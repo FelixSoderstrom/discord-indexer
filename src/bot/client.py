@@ -17,6 +17,9 @@ class DiscordBot(commands.Bot):
         # Storage for messages (will be replaced with database later)
         self.stored_messages: List[Dict[str, Any]] = []
         self.processed_channels: List[int] = []
+
+    async def close(self):
+        await super().close()
     
     async def setup_hook(self):
         """Called when bot is starting up."""

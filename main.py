@@ -30,11 +30,6 @@ async def main():
         await bot.start(settings.DISCORD_TOKEN)
     except KeyboardInterrupt:
         print("\n🛑 Bot stopped by user")
-        await bot.close()
-    except Exception as e:
-        print(f"❌ Bot failed to start: {e}")
-        logging.error(f"Bot startup error: {e}")
-        await bot.close()
 
 
 if __name__ == "__main__":
@@ -42,11 +37,5 @@ if __name__ == "__main__":
     print("Discord Message Indexer Bot")
     print("Building foundation for AI-powered search")
     print("=" * 50)
-    
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n👋 Goodbye!")
-    except Exception as e:
-        print(f"💥 Critical error: {e}")
-        logging.critical(f"Critical startup error: {e}")
+
+    asyncio.run(main())

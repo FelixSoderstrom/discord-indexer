@@ -3,35 +3,18 @@ from discord.ext import commands
 
 
 async def on_ready_handler(bot: commands.Bot):
-    """Handle bot ready event - process historical messages first."""
-    print("=== Bot is ready! Starting historical message processing ===")
+    """Handle bot ready event - start monitoring for new messages."""
+    print("=== Bot is ready! Now monitoring for new messages... ===")
     
-    # Process all historical messages
-    try:
-        historical_messages = await bot.get_all_historical_messages()
-        print(f"✅ Historical processing complete: {len(historical_messages)} messages stored")
-        
-        # Display sample data for validation
-        if historical_messages:
-            print("\n=== Sample Messages ===")
-            for msg in historical_messages[:3]:  # Show first 3 messages
-                print(f"[{msg['timestamp']}] #{msg['channel']['name']} - {msg['author']['name']}: {msg['content'][:50]}...")
-            print("=== End Sample ===\n")
-        
-        print("🔄 Now monitoring for new messages...")
-        
-    except Exception as e:
-        print(f"❌ Error during historical processing: {e}")
+    # Log available channels for info
+    channels = bot.get_all_channels()
+    print(f"📡 Monitoring {len(channels)} channels for new messages")
 
 
 async def on_message_handler(bot: commands.Bot, message: discord.Message):
     """Handle new incoming messages."""
     # Skip messages from the bot itself
     if message.author == bot.user:
-        return
-    
-    # Skip if still processing historical messages for this channel
-    if hasattr(bot, 'processed_channels') and message.channel.id not in bot.processed_channels:
         return
     
     # Extract and store the new message
