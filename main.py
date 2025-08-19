@@ -1,13 +1,18 @@
 import asyncio
 import logging
+from typing import NoReturn
 from src.config.settings import settings
 from src.bot.client import DiscordBot
 from src.bot.actions import setup_bot_actions
 
 
-async def main():
-    """Main execution flow - orchestrates the Discord bot."""
-    print("🚀 Starting Discord Indexer Bot...")
+async def main() -> None:
+    """Main execution flow - orchestrates the Discord bot.
+    
+    Sets up logging, creates bot instance, configures event handlers,
+    and starts the Discord connection with proper error handling.
+    """
+    logger = logging.getLogger(__name__)
     
     # Setup logging based on DEBUG setting
     log_level = logging.INFO if settings.DEBUG else logging.WARNING
@@ -16,20 +21,26 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    # Create bot instance
-    print("🤖 Creating bot instance...")
-    bot = DiscordBot()
+    logger.info("🚀 Starting Discord Indexer Bot...")
     
-    # Setup actions and event handlers
-    print("⚙️  Setting up event handlers...")
-    setup_bot_actions(bot)
-    
-    # Start bot with token
-    print("🔐 Connecting to Discord...")
     try:
+        # Create bot instance
+        logger.info("🤖 Creating bot instance...")
+        bot = DiscordBot()
+        
+        # Setup actions and event handlers
+        logger.info("⚙️ Setting up event handlers...")
+        setup_bot_actions(bot)
+        
+        # Start bot with token
+        logger.info("🔐 Connecting to Discord...")
         await bot.start(settings.DISCORD_TOKEN)
+        
     except KeyboardInterrupt:
-        print("\n🛑 Bot stopped by user")
+        logger.info("🛑 Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Failed to start bot: {e}")
+        raise
 
 
 if __name__ == "__main__":
