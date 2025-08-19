@@ -3,3 +3,4 @@ venv/
 models/
 database/
 inlämning.txt
+__pycache__/
