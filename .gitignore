@@ -4,3 +4,4 @@ models/
 database/
 inlämning.txt
 __pycache__/
+/.cursor/
