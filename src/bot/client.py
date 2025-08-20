@@ -2,7 +2,10 @@ import discord
 from discord.ext import commands
 from src.config.settings import settings
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..message_processing import MessagePipeline
 
 
 class DiscordBot(commands.Bot):
@@ -22,10 +25,16 @@ class DiscordBot(commands.Bot):
         # Storage for messages (will be replaced with database later)
         self.stored_messages: List[Dict[str, Any]] = []
         self.processed_channels: List[int] = []
+        self.message_pipeline: Optional["MessagePipeline"] = None
         self.logger = logging.getLogger(__name__)
 
     async def close(self) -> None:
         """Clean shutdown of bot connection."""
+        # Clear message pipeline reference
+        if self.message_pipeline:
+            self.message_pipeline = None
+            self.logger.info("Message pipeline cleared")
+        
         await super().close()
     
     async def setup_hook(self) -> None:

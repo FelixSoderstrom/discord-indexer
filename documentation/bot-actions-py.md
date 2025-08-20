@@ -1,13 +1,13 @@
 # src/bot/actions.py Documentation
 
 ## Purpose
-Event handler system for Discord bot events. Manages the bot's response to Discord events like connection and new messages.
+Event handler system for Discord bot events with message processing pipeline integration. Manages bot's response to Discord events and coordinates message processing through the pipeline architecture.
 
 ## What It Does
 1. **Event Registration**: Registers Discord event handlers with the bot instance
-2. **Historical Processing**: Handles initial message indexing when bot starts
-3. **Real-time Monitoring**: Captures new messages as they arrive
-4. **Validation Output**: Provides console feedback for message capture
+2. **Pipeline Initialization**: Sets up message processing pipeline when bot connects
+3. **Real-time Processing**: Processes new messages through complete pipeline workflow
+4. **Fail-Fast Error Handling**: Shuts down application on pipeline failures
 
 ## Event Handlers
 
@@ -15,23 +15,17 @@ Event handler system for Discord bot events. Manages the bot's response to Disco
 **Triggered**: When bot successfully connects to Discord
 
 **Process**:
-1. **Historical Message Processing**: Calls `bot.get_all_historical_messages()`
-2. **Progress Reporting**: Shows total messages captured
-3. **Sample Display**: Prints first 3 messages for validation
-4. **Status Update**: Confirms transition to real-time monitoring
+1. **Pipeline Initialization**: Creates and initializes `MessagePipeline` instance
+2. **Pipeline Assignment**: Assigns pipeline to bot instance (`bot.message_pipeline`)
+3. **Channel Discovery**: Logs available channels for monitoring
+4. **Status Confirmation**: Reports successful initialization
 
 **Console Output Example**:
 ```
-=== Bot is ready! Starting historical message processing ===
-✅ Historical processing complete: 47 messages stored
-
-=== Sample Messages ===
-[2024-01-15T10:30:00] #general - username: Hello everyone, how's it going...
-[2024-01-15T11:15:00] #random - otheruser: Check out this cool link...
-[2024-01-15T12:00:00] #general - username: Anyone available for a quick call...
-=== End Sample ===
-
-🔄 Now monitoring for new messages...
+=== Bot is ready! Now monitoring for new messages... ===
+🔧 Initializing message processing pipeline...
+✅ Message pipeline initialized successfully
+📡 Monitoring 5 channels for new messages
 ```
 
 ### `on_message_handler(bot, message)`
@@ -39,17 +33,24 @@ Event handler system for Discord bot events. Manages the bot's response to Disco
 
 **Filtering Logic**:
 1. **Skip Bot Messages**: Ignores messages from the bot itself
-2. **Historical Processing Check**: Skips messages from channels still being processed
-3. **Channel Verification**: Only processes messages from already-indexed channels
+2. **Pipeline Availability Check**: Verifies pipeline is initialized and available
+3. **Critical Failure Handling**: Shuts down application if pipeline unavailable
 
 **Process**:
 1. **Message Extraction**: Uses `bot._extract_message_data(message)`
-2. **Storage**: Appends to `bot.stored_messages` list
-3. **Notification**: Prints real-time message notification
+2. **Pipeline Processing**: Calls `bot.message_pipeline.process_message(message_data)`
+3. **Success Verification**: Checks pipeline processing success
+4. **Fail-Fast Behavior**: Shuts down application on processing failures
 
 **Console Output Example**:
 ```
-📨 New message: #general - username: Hey, just wanted to share this...
+📨 Processing new message: #general - username: Hey, just wanted to share this...
+```
+
+**Critical Error Example**:
+```
+❌ Message pipeline not available - application is fundamentally broken
+🛑 Shutting down application - cannot process messages without pipeline
 ```
 
 ## Setup Function
@@ -79,43 +80,48 @@ async def on_message(message):
 - **Reusability**: Handlers can be called from different contexts
 - **Maintainability**: Clean separation between event registration and logic
 
-### Why Historical Processing in on_ready?
-- **Complete Context**: Ensures all existing messages are captured before monitoring new ones
-- **Single Processing Pass**: Avoids duplicate processing of historical messages
-- **User Feedback**: Immediate validation that the bot is working
+### Why Pipeline Initialization in on_ready?
+- **Single Initialization**: Ensures pipeline is ready before any message processing
+- **Clear Lifecycle**: Pipeline created when bot is fully connected and ready
+- **Fail-Fast Setup**: Immediate indication if pipeline initialization fails
 
-### Why Channel Tracking?
-- **Prevents Duplicates**: Ensures real-time handler doesn't process messages during historical indexing
-- **Resume Capability**: Foundation for future resume-from-timestamp functionality
-- **Processing State**: Clear distinction between initialization and monitoring phases
+### Why Fail-Fast Error Handling?
+- **Application Integrity**: Prevents running in degraded state with broken core functionality
+- **Clear Feedback**: Immediate indication when core processing fails
+- **Operational Safety**: Avoids accumulating unprocessed messages or inconsistent state
 
 ## Message Flow
 
 ### Startup Flow
 ```
-Bot Connects → on_ready_handler() → Historical Processing → Real-time Monitoring
+Bot Connects → on_ready_handler() → Pipeline Initialization → Real-time Monitoring
 ```
 
 ### Real-time Flow
 ```
-New Message → on_message_handler() → Filter Checks → Extract & Store → Notification
+New Message → on_message_handler() → Pipeline Processing → Database Storage → Ready for Next
+```
+
+### Failure Flow
+```
+Pipeline Failure → Critical Error Logging → Application Shutdown (sys.exit(1))
 ```
 
 ## Error Handling
-- **Exception Catching**: Historical processing errors are caught and logged
-- **Graceful Degradation**: Errors don't prevent transition to real-time monitoring
-- **Filtering Safety**: Multiple checks prevent processing unwanted messages
+- **Critical Failure Detection**: Pipeline unavailability or processing failures trigger shutdown
+- **No Fallback Mechanisms**: Application does not operate in degraded modes
+- **Clean Shutdown**: Proper logging and graceful application termination
 
 ## Future Extensibility
 This event system is designed for easy extension:
 - **Additional Events**: Easy to add handlers for message edits, deletions, reactions
-- **Processing Pipeline**: Message extraction can be extended with additional processing steps
-- **Database Integration**: Storage calls can be replaced with database operations
-- **Webhooks**: Event handlers can trigger external APIs or webhooks
+- **Pipeline Extensions**: Message processing pipeline can be extended with additional processing modules
+- **Processing Hooks**: Pre and post-processing hooks can be added to pipeline workflow
+- **Monitoring Integration**: Event handlers can trigger monitoring and alerting systems
 
 ## Console Output Purpose
 The console output serves multiple purposes:
-- **Development Validation**: Confirms bot is capturing messages correctly
-- **Debugging**: Shows real-time activity for troubleshooting
-- **Progress Tracking**: Historical processing progress and completion
-- **Sample Data**: Immediate validation of data structure and content
+- **Development Validation**: Confirms bot is processing messages correctly through pipeline
+- **Debugging**: Shows real-time pipeline activity and processing status
+- **Error Diagnosis**: Clear indication of pipeline failures and shutdown reasons
+- **Operational Monitoring**: Processing statistics and pipeline health status

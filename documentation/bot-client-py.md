@@ -1,13 +1,14 @@
 # src/bot/client.py Documentation
 
 ## Purpose
-Core Discord bot implementation that handles connection, message storage, and data extraction functionality.
+Core Discord bot implementation that handles connection, message processing pipeline integration, and data extraction functionality.
 
 ## What It Does
 1. **Discord Connection**: Manages bot connection with proper intents and configuration
-2. **Message Storage**: In-memory storage of extracted messages for validation
-3. **Historical Processing**: Fetches all existing messages from accessible channels
-4. **Data Extraction**: Converts Discord messages to structured data format
+2. **Pipeline Integration**: Hosts message processing pipeline for real-time message handling
+3. **Message Storage**: In-memory storage of extracted messages for validation (legacy/fallback)
+4. **Historical Processing**: Fetches all existing messages from accessible channels
+5. **Data Extraction**: Converts Discord messages to structured data format
 
 ## Class: DiscordBot
 
@@ -16,11 +17,13 @@ Core Discord bot implementation that handles connection, message storage, and da
 - Configures command prefix from settings
 - Sets up Discord intents for message access
 - Initializes storage containers for messages and channel tracking
+- Prepares message processing pipeline attribute (initialized later)
 
 ### Storage Attributes
 ```python
-self.stored_messages: List[Dict[str, Any]] = []  # All captured messages
-self.processed_channels: List[int] = []          # Channels that have been indexed
+self.stored_messages: List[Dict[str, Any]] = []       # All captured messages (legacy/fallback)
+self.processed_channels: List[int] = []               # Channels that have been indexed
+self.message_pipeline: Optional[MessagePipeline] = None  # Message processing pipeline
 ```
 
 ## Key Methods
@@ -52,6 +55,7 @@ self.processed_channels: List[int] = []          # Channels that have been index
 
 ### `_extract_message_data(message)`
 - **Purpose**: Converts Discord Message object to structured data
+- **Used By**: Both historical processing and real-time pipeline processing
 - **Extracts**:
   - Message ID and content
   - Author information (ID, username, display name)
@@ -61,6 +65,13 @@ self.processed_channels: List[int] = []          # Channels that have been index
   - Attachment URLs
   - Embed presence
   - Message type
+
+### `close()`
+- **Purpose**: Clean shutdown of bot connection with proper resource cleanup
+- **Process**:
+  1. **Pipeline Cleanup**: Clears message pipeline reference if available
+  2. **Parent Cleanup**: Calls parent class close() method for Discord connection
+- **Resource Safety**: Ensures proper cleanup of both pipeline and Discord resources
 
 ## Message Data Structure
 ```python
@@ -94,10 +105,20 @@ self.processed_channels: List[int] = []          # Channels that have been index
 
 ## Design Decisions
 
-### Why In-Memory Storage?
-- **Foundation Phase**: Simple validation of message capture functionality
-- **Easy Replacement**: List structure easily replaceable with database later
-- **Debugging**: Direct access to captured data for verification
+### Why Pipeline Integration at Bot Level?
+- **Single Responsibility**: Bot handles Discord connection, pipeline handles processing
+- **Clean Separation**: Discord concerns separated from message processing logic
+- **Resource Management**: Bot manages pipeline lifecycle alongside Discord connection
+
+### Why Optional Pipeline Attribute?
+- **Initialization Order**: Pipeline created after bot is fully connected and ready
+- **Type Safety**: Optional typing indicates pipeline may not be available during startup
+- **Graceful Shutdown**: Pipeline can be cleared independently during shutdown
+
+### Why In-Memory Storage Retention?
+- **Legacy Support**: Maintains compatibility with existing functionality
+- **Debugging**: Direct access to captured data for verification and testing
+- **Fallback Capability**: Provides backup storage mechanism if needed
 
 ### Why Historical-First Processing?
 - **Complete Picture**: Gets all existing context before monitoring new messages
@@ -106,12 +127,15 @@ self.processed_channels: List[int] = []          # Channels that have been index
 
 ## Future Extensibility
 This implementation is designed for easy extension:
-- **Database Integration**: `stored_messages` list easily replaced with database calls
-- **Processing Pipeline**: Message extraction can pipe to additional processing steps
+- **Pipeline Enhancement**: Message processing pipeline can be extended with additional modules
+- **Database Integration**: Historical processing can integrate with pipeline storage
 - **Filtering**: Channel discovery can be extended with filtering criteria
 - **Pagination**: Message fetching already handles Discord's pagination requirements
+- **Multi-Pipeline Support**: Architecture supports multiple specialized pipelines
 
 ## Performance Considerations
 - **Rate Limiting**: Respects Discord API rate limits
 - **Memory Usage**: Stores messages in memory (suitable for small-medium servers)
 - **Channel Limits**: Fetches up to 1000 messages per channel (Discord API limit)
+- **Pipeline Integration**: Message processing offloaded to dedicated pipeline architecture
+- **Resource Management**: Pipeline lifecycle managed alongside Discord connection
