@@ -1,9 +1,9 @@
 """Database module for Discord message indexer.
 
-This module handles database connections, session management, and provides
+This module handles ChromaDB client initialization and management, providing
 the core database infrastructure for the application.
 """
 
-from .setup_db import get_db
+from .setup_db import initialize_db, get_db
 
-__all__ = ['get_db']
+__all__ = ["initialize_db", "get_db"]

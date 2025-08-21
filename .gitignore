@@ -5,3 +5,4 @@ database/
 inlämning.txt
 __pycache__/
 /.cursor/
+chroma_data/
