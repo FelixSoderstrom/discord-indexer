@@ -21,9 +21,6 @@ def extract_urls(message_content: str) -> List[str]:
     Returns:
         List of extracted URLs
     """
-    logger.info("extract_urls - not implemented")
-    
-    # Placeholder: Basic URL regex pattern
     url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
     urls = re.findall(url_pattern, message_content)
     
@@ -39,9 +36,6 @@ def extract_mentions(message_content: str) -> Dict[str, List[str]]:
     Returns:
         Dictionary containing user_mentions and channel_mentions lists
     """
-    logger.info("extract_mentions - not implemented")
-    
-    # Placeholder: Basic mention patterns
     user_mentions = re.findall(r'<@!?(\d+)>', message_content)
     channel_mentions = re.findall(r'<#(\d+)>', message_content)
     
@@ -62,14 +56,12 @@ def analyze_link_content(url: str) -> Optional[Dict[str, Any]]:
     """
     logger.info("analyze_link_content - not implemented")
     
-    # Placeholder: Return basic URL analysis
+    # TODO: Implement actual link analysis
+    # (decription, content_type) = SomeClass.SomeMethod(url)
     return {
         'url': url,
-        'domain': 'placeholder.com',
-        'title': 'Placeholder Title',
-        'description': 'Placeholder description',
-        'content_type': 'webpage',
-        'accessible': True
+        'description': 'Summary of the content',
+        'content_type': 'Article/Video/Image/etc..',
     }
 
 
@@ -84,7 +76,6 @@ def process_message_extractions(message_data: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Dictionary containing extraction results
     """
-    logger.info("process_message_extractions - not implemented")
     
     extraction_results = {
         'urls': [],
@@ -102,13 +93,13 @@ def process_message_extractions(message_data: Dict[str, Any]) -> Dict[str, Any]:
     
     message_content = message_data.get('content', '')
     
-    # Extract URLs
     if message_content:
+        # Extract URLs
         urls = extract_urls(message_content)
         extraction_results['urls'] = urls
         extraction_results['extraction_metadata']['urls_found'] = len(urls)
         
-        # Analyze each URL
+        # Analyze each URL - NOT IMPLEMENTED
         for url in urls:
             link_analysis = analyze_link_content(url)
             if link_analysis:

@@ -25,6 +25,9 @@ def embed_text_content(message_content: str) -> Optional[List[float]]:
     if not message_content.strip():
         return None
     
+    # TODO: Implement actual text embedding
+    # embedded_content = SomeClass.some_method(message_content)
+
     # Placeholder: Return dummy embedding vector
     return [0.0] * 384  # Common embedding dimension
 
@@ -39,6 +42,9 @@ def embed_image_content(image_url: str) -> Optional[List[float]]:
         Vector embedding as list of floats, None if processing fails
     """
     logger.info("embed_image_content - not implemented")
+
+    # TODO: Implement actual image embedding
+    # embedded_content = SomeClass.some_method(image_url)
     
     # Placeholder: Return dummy embedding vector
     return [0.0] * 512  # Common image embedding dimension

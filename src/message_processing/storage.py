@@ -89,6 +89,9 @@ def store_extractions(db_session: Dict[str, Any], message_id: int, extractions: 
     if urls:
         logger.info(f"Would store {len(urls)} URLs for message {message_id}")
     
+    # TODO: Implement actual storage of urls
+
+    # Below here is shit - needs replacing
     if mentions.get('user_mentions') or mentions.get('channel_mentions'):
         total_mentions = len(mentions.get('user_mentions', [])) + len(mentions.get('channel_mentions', []))
         logger.info(f"Would store {total_mentions} mentions for message {message_id}")
@@ -125,7 +128,6 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
         logger.error("No message ID found in processed data")
         return False
     
-    # Use database session from setup_db
     try:
         with get_db() as db_session:
             success = True
