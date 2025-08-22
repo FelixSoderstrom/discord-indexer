@@ -1,13 +1,15 @@
 # src/bot/actions.py Documentation
 
 ## Purpose
-Event handler system for Discord bot events with message processing pipeline integration. Manages bot's response to Discord events and coordinates message processing through the pipeline architecture.
+Event handler system for Discord bot events with unified message processing pipeline integration. Manages bot's response to Discord events and coordinates both historical and real-time message processing through producer-consumer pattern.
 
 ## What It Does
 1. **Event Registration**: Registers Discord event handlers with the bot instance
-2. **Pipeline Initialization**: Sets up message processing pipeline when bot connects
-3. **Real-time Processing**: Processes new messages through complete pipeline workflow
-4. **Fail-Fast Error Handling**: Shuts down application on pipeline failures
+2. **Pipeline Coordination**: Sets up message processing pipeline with async coordination
+3. **Historical Processing**: Processes all historical messages through unified pipeline on startup
+4. **Real-time Processing**: Processes new messages through unified pipeline interface
+5. **Producer-Consumer Management**: Implements backpressure control for optimal resource usage
+6. **Fail-Fast Error Handling**: Shuts down application on pipeline failures
 
 ## Event Handlers
 
@@ -15,18 +17,26 @@ Event handler system for Discord bot events with message processing pipeline int
 **Triggered**: When bot successfully connects to Discord
 
 **Process**:
-1. **Pipeline Initialization**: Creates and initializes `MessagePipeline` instance
-2. **Pipeline Assignment**: Assigns pipeline to bot instance (`bot.message_pipeline`)
-3. **Channel Discovery**: Logs available channels for monitoring
-4. **Status Confirmation**: Reports successful initialization
+1. **Pipeline Initialization**: Creates `MessagePipeline` with `completion_event` for coordination
+2. **Historical Processing**: Calls `process_historical_messages_through_pipeline()` for complete processing
+3. **Success Transition**: Transitions to real-time monitoring after historical completion
+4. **Failure Handling**: Shuts down application if historical processing fails
 
 **Console Output Example**:
 ```
-=== Bot is ready! Now monitoring for new messages... ===
+=== Bot is ready! Starting message processing... ===
 🔧 Initializing message processing pipeline...
 ✅ Message pipeline initialized successfully
+📜 Starting historical message processing through pipeline...
+✅ Historical message processing completed successfully
+📡 Now monitoring for new real-time messages...
 📡 Monitoring 5 channels for new messages
 ```
+
+**Producer-Consumer Coordination**:
+- Pipeline initialized with `bot.pipeline_ready` event for async coordination
+- Historical processing uses batching with backpressure control
+- All messages processed through unified interface before real-time monitoring
 
 ### `on_message_handler(bot, message)`
 **Triggered**: When any new message is sent in accessible channels
@@ -38,9 +48,16 @@ Event handler system for Discord bot events with message processing pipeline int
 
 **Process**:
 1. **Message Extraction**: Uses `bot._extract_message_data(message)`
-2. **Pipeline Processing**: Calls `bot.message_pipeline.process_message(message_data)`
-3. **Success Verification**: Checks pipeline processing success
-4. **Fail-Fast Behavior**: Shuts down application on processing failures
+2. **Unified Interface**: Wraps single message in list: `[message_data]`
+3. **Pipeline Processing**: Calls `bot.send_batch_to_pipeline([message_data])`
+4. **Coordination**: Waits for pipeline completion via producer-consumer pattern
+5. **Success Verification**: Checks pipeline processing success
+6. **Fail-Fast Behavior**: Shuts down application on processing failures
+
+**Unified Processing**:
+- Uses same batch interface as historical processing
+- Single message wrapped in list for consistent pipeline interface
+- Producer-consumer coordination ensures proper resource management
 
 **Console Output Example**:
 ```
@@ -94,12 +111,22 @@ async def on_message(message):
 
 ### Startup Flow
 ```
-Bot Connects → on_ready_handler() → Pipeline Initialization → Real-time Monitoring
+Bot Connects → on_ready_handler() → Pipeline Initialization → Historical Processing → Real-time Monitoring
+```
+
+### Historical Processing Flow
+```
+Historical Batches → send_batch_to_pipeline() → Chronological Sorting → Sequential Processing → Coordination
 ```
 
 ### Real-time Flow
 ```
-New Message → on_message_handler() → Pipeline Processing → Database Storage → Ready for Next
+New Message → on_message_handler() → Wrap in List → send_batch_to_pipeline() → Pipeline Processing → Coordination
+```
+
+### Unified Processing
+```
+All Messages → send_batch_to_pipeline() → process_messages() → Chronological Order → Sequential Processing
 ```
 
 ### Failure Flow
@@ -116,7 +143,9 @@ Pipeline Failure → Critical Error Logging → Application Shutdown (sys.exit(1
 This event system is designed for easy extension:
 - **Additional Events**: Easy to add handlers for message edits, deletions, reactions
 - **Pipeline Extensions**: Message processing pipeline can be extended with additional processing modules
+- **Resume Functionality**: Historical processing foundation ready for timestamp-based resume
 - **Processing Hooks**: Pre and post-processing hooks can be added to pipeline workflow
+- **Coordination Extensions**: Producer-consumer pattern can support multiple pipelines
 - **Monitoring Integration**: Event handlers can trigger monitoring and alerting systems
 
 ## Console Output Purpose

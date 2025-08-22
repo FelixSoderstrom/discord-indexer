@@ -19,12 +19,13 @@ The message processing pipeline follows a modular, sequential design where messa
 
 ### Processing Flow
 
-1. **Message Reception**: Bot receives Discord message via event handlers
-2. **Data Extraction**: Raw Discord message converted to structured data dictionary
-3. **Content Analysis**: Message analyzed to determine required processing steps
-4. **Conditional Routing**: Message routed through appropriate processing modules based on content
-5. **Storage Coordination**: Processed data stored in database using transaction management
-6. **Result Reporting**: Success/failure status returned to enable serial processing
+1. **Message Collection**: Bot collects messages in batches (historical: 1000 per batch, real-time: single message in list)
+2. **Chronological Sorting**: Messages sorted by timestamp to ensure proper processing order
+3. **Batch Processing**: Pipeline processes entire batch sequentially through unified interface
+4. **Content Analysis**: Each message analyzed to determine required processing steps
+5. **Conditional Routing**: Messages routed through appropriate processing modules based on content
+6. **Storage Coordination**: Processed data stored in database using transaction management
+7. **Completion Signaling**: Pipeline signals completion to enable producer-consumer coordination
 
 ### Content-Based Processing
 
@@ -38,11 +39,12 @@ The pipeline intelligently processes messages based on their content:
 
 ### Error Handling Strategy
 
-The pipeline implements a fail-fast approach:
-- Any processing failure triggers application shutdown
-- No fallback mechanisms or degraded modes
+The pipeline implements a fail-fast approach with batch coordination:
+- Any message processing failure within a batch triggers application shutdown
+- Batch processing ensures atomic success/failure for entire batches
+- Producer-consumer pattern with backpressure prevents overwhelming system resources
 - Database operations use proper transaction management
-- Serial processing ensures message order consistency
+- Chronological sorting and sequential processing ensures message order consistency
 
 ### Database Integration
 
@@ -53,11 +55,13 @@ Database concerns are completely separated from message processing logic:
 
 ### Current Implementation Status
 
-- **Pipeline Coordination**: Fully implemented with complete workflow orchestration
+- **Unified Pipeline Interface**: Fully implemented with batch processing for both historical and real-time messages
+- **Producer-Consumer Pattern**: Fully implemented with asyncio coordination and backpressure control
+- **Chronological Processing**: Fully implemented with timestamp-based sorting across multiple channels
 - **Content Analysis**: Fully implemented with intelligent routing logic
 - **Database Architecture**: Fully implemented with proper separation of concerns
 - **Processing Modules**: Skeleton implementations with placeholder logic ready for real functionality
-- **Error Handling**: Fully implemented with fail-fast behavior
+- **Error Handling**: Fully implemented with fail-fast behavior and batch coordination
 
 ### Future Implementation
 

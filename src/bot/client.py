@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord.ext import commands
 from src.config.settings import settings
@@ -23,10 +24,17 @@ class DiscordBot(commands.Bot):
             intents=settings.get_intents,
             help_command=None,
         )
-        # Storage for messages (will be replaced with database later)
+        # Pipeline coordination
+        self.pipeline_ready = asyncio.Event()
+        self.pipeline_ready.set()  # Initially ready
+        self.message_pipeline: Optional["MessagePipeline"] = None
+        self.batch_size = 1000
+        
+        # Legacy storage (will be removed when pipeline fully implemented)
         self.stored_messages: List[Dict[str, Any]] = []
         self.processed_channels: List[int] = []
-        self.message_pipeline: Optional["MessagePipeline"] = None
+        
+        # Rate limiting and logging
         self.rate_limiter = DiscordRateLimiter()
         self.logger = logging.getLogger(__name__)
 
@@ -117,15 +125,114 @@ class DiscordBot(commands.Bot):
             self.logger.warning(f"Channel #{channel.name} not found: {e}")
             return []
 
-    async def get_all_historical_messages(self) -> List[Dict[str, Any]]:
-        """Fetch all historical messages from all accessible channels.
+    async def send_batch_to_pipeline(self, messages: List[Dict[str, Any]]) -> bool:
+        """Send a batch of messages to pipeline and wait for completion.
+        
+        Implements backpressure by waiting for pipeline to finish processing
+        before allowing the next batch to be sent.
+        
+        Args:
+            messages: List of message data dictionaries to process
+            
+        Returns:
+            True if batch processed successfully, False if failed
+        """
+        if not self.message_pipeline:
+            self.logger.error("Message pipeline not available")
+            return False
+            
+        if not messages:
+            self.logger.info("No messages to send to pipeline")
+            return True
+        
+        self.logger.info(f"Sending batch of {len(messages)} messages to pipeline")
+        
+        # Clear the ready event before processing
+        self.pipeline_ready.clear()
+        
+        # Send batch to pipeline for processing
+        success = await self.message_pipeline.process_messages(messages)
+        
+        # Wait for pipeline to signal completion
+        await self.pipeline_ready.wait()
+        
+        if success:
+            self.logger.info("Batch processing completed successfully")
+        else:
+            self.logger.error("Batch processing failed")
+            
+        return success
+    
+    async def process_historical_messages_through_pipeline(self) -> bool:
+        """Process all historical messages through the pipeline with batching and backpressure.
+        
+        Fetches historical messages in batches and sends them to pipeline
+        with proper coordination to prevent overwhelming the system.
+        
+        Returns:
+            True if all historical messages processed successfully, False if failed
+        """
+        if not self.message_pipeline:
+            self.logger.error("Message pipeline not available for historical processing")
+            return False
+            
+        channels = self.get_all_channels()
+        
+        if not channels:
+            self.logger.info("No channels available for historical processing")
+            return True
 
-        Uses rate-limited parallel fetching for optimal performance while
-        respecting Discord's 50 requests/second global bot limit.
+        self.logger.info(f"Processing {len(channels)} channels for historical messages through pipeline...")
+
+        try:
+            # Process channels in batches to implement backpressure
+            total_processed = 0
+            
+            for i in range(0, len(channels), 5):  # Process 5 channels at a time
+                channel_batch = channels[i:i+5]
+                
+                self.logger.info(f"Fetching messages from channels {i+1}-{min(i+5, len(channels))} of {len(channels)}")
+                
+                # Fetch messages from this batch of channels
+                batch_messages = await self.rate_limiter.batch_fetch_messages(
+                    channels=channel_batch,
+                    messages_per_channel=1000,
+                    max_concurrent_channels=5,
+                )
+                
+                if batch_messages:
+                    # Send batch to pipeline and wait for completion
+                    success = await self.send_batch_to_pipeline(batch_messages)
+                    
+                    if not success:
+                        self.logger.error("Failed to process historical message batch")
+                        return False
+                    
+                    total_processed += len(batch_messages)
+                    self.logger.info(f"Processed {total_processed} historical messages so far")
+                
+                # Update processed channels list
+                for channel in channel_batch:
+                    self.processed_channels.append(channel.id)
+
+            self.logger.info(f"Historical message processing completed. Total processed: {total_processed}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error during historical message processing: {e}")
+            return False
+
+    async def get_all_historical_messages(self) -> List[Dict[str, Any]]:
+        """Legacy method for fetching all historical messages without pipeline processing.
+        
+        DEPRECATED: Use process_historical_messages_through_pipeline() instead.
+        This method bypasses the pipeline and is only kept for compatibility.
 
         Returns:
             List of all extracted message data from accessible channels
         """
+        self.logger.warning("Using deprecated get_all_historical_messages - messages will bypass pipeline")
+        
         channels = self.get_all_channels()
 
         self.logger.info(

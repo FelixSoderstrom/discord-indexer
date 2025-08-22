@@ -21,11 +21,18 @@ Core Discord bot implementation that handles connection, message processing pipe
 - Prepares message processing pipeline attribute (initialized later)
 - Creates `DiscordRateLimiter` instance for intelligent API rate limiting
 
-### Storage Attributes
+### Storage and Coordination Attributes
 ```python
-self.stored_messages: List[Dict[str, Any]] = []       # All captured messages (legacy/fallback)
-self.processed_channels: List[int] = []               # Channels that have been indexed
-self.message_pipeline: Optional[MessagePipeline] = None  # Message processing pipeline
+# Pipeline coordination
+self.pipeline_ready: asyncio.Event = asyncio.Event()    # Event for producer-consumer coordination
+self.message_pipeline: Optional[MessagePipeline] = None # Message processing pipeline
+self.batch_size: int = 1000                             # Batch size for message processing
+
+# Legacy storage (will be removed when pipeline fully implemented)
+self.stored_messages: List[Dict[str, Any]] = []         # All captured messages (legacy/fallback)
+self.processed_channels: List[int] = []                 # Channels that have been indexed
+
+# Rate limiting and logging
 self.rate_limiter: DiscordRateLimiter = DiscordRateLimiter()  # Rate limiting for Discord API calls
 ```
 
@@ -47,17 +54,36 @@ self.rate_limiter: DiscordRateLimiter = DiscordRateLimiter()  # Rate limiting fo
   - API rate limits
 - **Returns**: List of extracted message data dictionaries
 
-### `get_all_historical_messages()`
-- **Purpose**: Main historical processing function with parallel rate-limited fetching
+### `send_batch_to_pipeline(messages)`
+- **Purpose**: Send batch of messages to pipeline with producer-consumer coordination
+- **Parameters**: List of message data dictionaries to process
+- **Process**:
+  1. Validates pipeline availability and message batch
+  2. Clears pipeline_ready event to signal processing start
+  3. Calls `pipeline.process_messages(messages)` for batch processing
+  4. Waits for pipeline_ready event to be set (completion signal)
+  5. Returns success/failure status
+- **Coordination**: Implements backpressure by waiting for pipeline completion
+- **Error Handling**: Handles pipeline unavailability and processing failures
+
+### `process_historical_messages_through_pipeline()`
+- **Purpose**: Process all historical messages through unified pipeline with batching and backpressure
 - **Process**:
   1. Discovers all accessible channels
-  2. Uses `self.rate_limiter.batch_fetch_messages()` for parallel processing
-  3. Fetches from up to 5 channels simultaneously while respecting Discord's 50/second global limit
-  4. Stores results in `self.stored_messages`
-  5. Tracks processed channels
-- **Performance**: Significantly faster than sequential fetching (4x improvement for typical servers)
-- **Safety**: Automatic retry logic and rate limit compliance
-- **Configuration**: 1000 messages per channel, 5 concurrent channels (configurable)
+  2. Processes channels in batches of 5 to implement backpressure
+  3. Uses `rate_limiter.batch_fetch_messages()` for parallel fetching within each batch
+  4. Sends each batch to pipeline using `send_batch_to_pipeline()`
+  5. Waits for pipeline completion before fetching next batch
+  6. Tracks processed channels for future resume functionality
+- **Performance**: Optimal throughput while respecting system resource limits
+- **Safety**: Maximum 2 batches in memory (processing + ready), crash-safe
+- **Coordination**: Producer-consumer pattern prevents overwhelming consumer hardware
+
+### `get_all_historical_messages()` (DEPRECATED)
+- **Purpose**: Legacy historical processing function that bypasses pipeline
+- **Status**: Maintained for compatibility but logs deprecation warning
+- **Process**: Same as original but stores in memory without pipeline processing
+- **Recommendation**: Use `process_historical_messages_through_pipeline()` instead
 
 ### `_extract_message_data(message)`
 - **Purpose**: Converts Discord Message object to structured data
@@ -115,11 +141,19 @@ self.rate_limiter: DiscordRateLimiter = DiscordRateLimiter()  # Rate limiting fo
 - **Single Responsibility**: Bot handles Discord connection, pipeline handles processing
 - **Clean Separation**: Discord concerns separated from message processing logic
 - **Resource Management**: Bot manages pipeline lifecycle alongside Discord connection
+- **Unified Interface**: Both historical and real-time messages use same pipeline processing
+
+### Why Producer-Consumer Coordination?
+- **Backpressure Control**: Prevents overwhelming system resources during batch processing
+- **Memory Bounded**: Maximum 2 batches in memory (processing + ready)
+- **Crash Safety**: Only lose 1-2 batches maximum if system fails
+- **Resource Efficiency**: Natural flow control adapts to processing capacity
 
 ### Why Optional Pipeline Attribute?
 - **Initialization Order**: Pipeline created after bot is fully connected and ready
 - **Type Safety**: Optional typing indicates pipeline may not be available during startup
 - **Graceful Shutdown**: Pipeline can be cleared independently during shutdown
+- **Coordination**: Pipeline initialized with completion_event for async signaling
 
 ### Why In-Memory Storage Retention?
 - **Legacy Support**: Maintains compatibility with existing functionality
@@ -142,19 +176,21 @@ self.rate_limiter: DiscordRateLimiter = DiscordRateLimiter()  # Rate limiting fo
 ## Future Extensibility
 This implementation is designed for easy extension:
 - **Pipeline Enhancement**: Message processing pipeline can be extended with additional modules
-- **Database Integration**: Historical processing can integrate with pipeline storage
+- **Unified Processing**: Both historical and real-time messages use identical processing interface
+- **Resume Functionality**: Chronological processing and coordination ready for timestamp-based resume
 - **Filtering**: Channel discovery can be extended with filtering criteria
-- **Pagination**: Message fetching already handles Discord's pagination requirements
-- **Multi-Pipeline Support**: Architecture supports multiple specialized pipelines
+- **Batch Size Optimization**: Configurable batch sizes for different hardware capabilities
+- **Multi-Pipeline Support**: Architecture supports multiple specialized pipelines with shared coordination
 - **Rate Limiter Configuration**: Rate limiting parameters can be adjusted for different server sizes and requirements
-- **Advanced Rate Limiting**: Can be extended with priority queuing, adaptive limits, or distributed rate limiting
+- **Advanced Coordination**: Can be extended with priority queuing, parallel pipelines, or distributed processing
 
 ## Performance Considerations
 - **Intelligent Rate Limiting**: Respects Discord's 50 requests/second global bot limit with automatic retry logic
-- **Parallel Processing**: Fetches from multiple channels simultaneously (up to 5 concurrent channels)
-- **Memory Usage**: Stores messages in memory (suitable for small-medium servers)
-- **Channel Limits**: Fetches up to 1000 messages per channel (Discord API limit)
-- **Pipeline Integration**: Message processing offloaded to dedicated pipeline architecture
-- **Resource Management**: Pipeline and rate limiter lifecycle managed alongside Discord connection
-- **Throughput**: 4x performance improvement over sequential fetching for typical Discord servers
-- **Error Recovery**: Graceful handling of API failures with automatic retries and fallback mechanisms
+- **Producer-Consumer Pattern**: Optimal throughput with natural backpressure control
+- **Memory Bounded**: Maximum 2 batches in memory (processing + ready) prevents resource exhaustion
+- **Batch Processing**: 1000 messages per batch for optimal processing efficiency
+- **Parallel Fetching**: Fetches from multiple channels simultaneously (up to 5 concurrent channels)
+- **Pipeline Coordination**: Message processing offloaded to dedicated pipeline with async coordination
+- **Resource Management**: Pipeline lifecycle and coordination managed alongside Discord connection
+- **Throughput**: 4x performance improvement over sequential fetching while respecting system limits
+- **Error Recovery**: Graceful handling of API failures with automatic retries and coordination cleanup

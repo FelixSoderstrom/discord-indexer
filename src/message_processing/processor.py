@@ -5,8 +5,9 @@ message processing workflow from raw Discord messages through
 embedding, extraction, metadata preparation, and storage.
 """
 
+import asyncio
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from .embedding import process_message_embeddings
 from .extraction import process_message_extractions
@@ -25,13 +26,20 @@ class MessagePipeline:
     and database storage.
     """
     
-    def __init__(self) -> None:
-        """Initialize the message processing pipeline."""
+    def __init__(self, completion_event: Optional[asyncio.Event] = None) -> None:
+        """Initialize the message processing pipeline.
+        
+        Args:
+            completion_event: Event to signal when batch processing is complete
+        """
         logger.info("Initializing MessagePipeline")
         
         # Processing statistics
         self.messages_processed = 0
         self.messages_failed = 0
+        
+        # Async coordination
+        self.completion_event = completion_event
         
         logger.info("MessagePipeline initialized successfully")
     
@@ -94,29 +102,54 @@ class MessagePipeline:
         processed_data['processing_status'] = 'completed'
         return processed_data
     
-    def process_message(self, message_data: Dict[str, Any]) -> bool:
-        """Process a single Discord message through the complete pipeline.
-        
-        Main entry point for message processing. Analyzes content,
-        routes through appropriate processing steps, and stores results.
+    def _sort_messages_chronologically(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Sort messages in chronological order by timestamp.
         
         Args:
-            message_data: Raw message data dictionary from Discord
+            messages: List of message data dictionaries
             
         Returns:
-            True if processing successful and ready for next message,
-            False if processing failed
+            List of messages sorted by timestamp (oldest first)
         """
-        logger.info(f"Processing message ID: {message_data.get('id', 'unknown')}")
+        return sorted(messages, key=lambda msg: msg.get('timestamp', ''))
+    
+    async def process_messages(self, messages: List[Dict[str, Any]]) -> bool:
+        """Process a list of Discord messages through the complete pipeline.
         
-        try:
+        Main entry point for message processing. Sorts messages chronologically,
+        then processes each message sequentially through the pipeline.
+        
+        Args:
+            messages: List of raw message data dictionaries from Discord
+            
+        Returns:
+            True if all messages processed successfully,
+            False if any message failed
+        """
+        if not messages:
+            logger.info("No messages to process")
+            if self.completion_event:
+                self.completion_event.set()
+            return True
+            
+        logger.info(f"Processing batch of {len(messages)} messages")
+    
+        # Sort messages chronologically to ensure proper processing order
+        sorted_messages = self._sort_messages_chronologically(messages)
+        logger.info("Messages sorted chronologically")
+        
+        # Process each message sequentially
+        for i, message_data in enumerate(sorted_messages, 1):
+            message_id = message_data.get('id', 'unknown')
+            logger.info(f"Processing message {i}/{len(sorted_messages)} - ID: {message_id}")
+            
             # Analyze message content to determine processing requirements
             content_analysis = self._check_message_content(message_data)
             
             # Skip empty messages
             if content_analysis['is_empty']:
                 logger.info("Skipping empty message")
-                return True
+                continue
             
             # Route message through appropriate processing steps
             processed_data = self._route_message_processing(message_data, content_analysis)
@@ -127,17 +160,21 @@ class MessagePipeline:
             
             if storage_success:
                 self.messages_processed += 1
-                logger.info(f"Message processing completed successfully. Total processed: {self.messages_processed}")
-                return True
+                logger.debug(f"Message {message_id} processed successfully. Total processed: {self.messages_processed}")
             else:
                 self.messages_failed += 1
-                logger.error("Failed to store processed message")
+                logger.error(f"Failed to store message {message_id}")
                 return False
+        
+        logger.info(f"Batch processing completed successfully. Processed {len(sorted_messages)} messages")
+        
+        # Signal completion if event is available
+        if self.completion_event:
+            self.completion_event.set()
+        
+        return True
                 
-        except Exception as e:
-            self.messages_failed += 1
-            logger.error(f"Error processing message: {e}")
-            return False
+
     
     def get_processing_stats(self) -> Dict[str, Any]:
         """Get current processing statistics.

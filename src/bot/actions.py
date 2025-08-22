@@ -11,30 +11,42 @@ if TYPE_CHECKING:
 
 
 async def on_ready_handler(bot: "DiscordBot") -> None:
-    """Handle bot ready event - start monitoring for new messages.
+    """Handle bot ready event - start historical processing and real-time monitoring.
     
-    Triggers historical message processing and transitions to real-time monitoring.
+    Initializes pipeline, processes historical messages, then transitions to real-time monitoring.
     
     Args:
         bot: DiscordBot instance with message processing capabilities
     """
     logger = logging.getLogger(__name__)
-    logger.info("=== Bot is ready! Now monitoring for new messages... ===")
+    logger.info("=== Bot is ready! Starting message processing... ===")
     
-    # Initialize message pipeline
+    # Initialize message pipeline with coordination event
     logger.info("🔧 Initializing message processing pipeline...")
-    bot.message_pipeline = MessagePipeline()
+    bot.message_pipeline = MessagePipeline(completion_event=bot.pipeline_ready)
     logger.info("✅ Message pipeline initialized successfully")
     
-    # Log available channels for info
-    channels = bot.get_all_channels()
-    logger.info(f"📡 Monitoring {len(channels)} channels for new messages")
+    # Process historical messages through pipeline
+    logger.info("📜 Starting historical message processing through pipeline...")
+    historical_success = await bot.process_historical_messages_through_pipeline()
+    
+    if historical_success:
+        logger.info("✅ Historical message processing completed successfully")
+        logger.info("📡 Now monitoring for new real-time messages...")
+        
+        # Log available channels for info
+        channels = bot.get_all_channels()
+        logger.info(f"📡 Monitoring {len(channels)} channels for new messages")
+    else:
+        logger.critical("❌ Historical message processing failed - shutting down")
+        await bot.close()
+        sys.exit(1)
 
 
 async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> None:
     """Handle new incoming messages.
     
-    Filters out bot messages and processes new user messages through the pipeline.
+    Filters out bot messages and processes new user messages through the unified pipeline.
     
     Args:
         bot: DiscordBot instance with message processing pipeline
@@ -53,14 +65,14 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
         await bot.close()
         sys.exit(1)
     
-    # Extract message data and process through pipeline
+    # Extract message data and wrap in list for unified pipeline interface
     message_data = bot._extract_message_data(message)
     
     content_preview = message.content[:30] + "..." if len(message.content) > 30 else message.content
     logger.info(f"📨 Processing new message: #{message.channel.name} - {message.author.name}: {content_preview}")
     
-    # Process message through pipeline
-    success = bot.message_pipeline.process_message(message_data)
+    # Send single message as batch to pipeline (unified interface)
+    success = await bot.send_batch_to_pipeline([message_data])
     
     if success:
         logger.debug("✅ Message processed successfully through pipeline")
