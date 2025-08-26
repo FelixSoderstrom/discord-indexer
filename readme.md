@@ -19,7 +19,6 @@ The bot extracts all messages from Discord channels, converts them to searchable
 
 ### Backend Stack
 - **Discord.py**: Bot framework and API integration
-- **FastAPI**: REST API for message processing pipeline
 - **ChromaDB**: Vector database for message storage and retrieval
 - **Sentence Transformers**: Text embedding generation
 - **Mistral 7B**: Local language model inference
