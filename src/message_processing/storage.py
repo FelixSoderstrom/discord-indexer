@@ -6,6 +6,7 @@ metadata, and extracted content in the appropriate database tables.
 
 import logging
 from typing import Dict, Any, Optional
+from chromadb import Client
 
 from ..db import get_db
 
@@ -13,11 +14,11 @@ from ..db import get_db
 logger = logging.getLogger(__name__)
 
 
-def store_message_data(db_session: Dict[str, Any], message_data: Dict[str, Any]) -> bool:
+def store_message_data(db_client: Client, message_data: Dict[str, Any]) -> bool:
     """Store core message data in database.
     
     Args:
-        db_session: Active database session
+        db_client: ChromaDB client instance
         message_data: Processed message metadata
         
     Returns:
@@ -25,20 +26,16 @@ def store_message_data(db_session: Dict[str, Any], message_data: Dict[str, Any])
     """
     logger.info("store_message_data - not implemented")
     
-    if not db_session.get("connected", False):
-        logger.warning("Database session not connected")
-        return False
-    
     # Placeholder: Would insert message data into messages table
     logger.info(f"Would store message ID: {message_data.get('message_id')}")
     return True
 
 
-def store_embeddings(db_session: Dict[str, Any], message_id: int, embeddings: Dict[str, Any]) -> bool:
+def store_embeddings(db_client: Client, message_id: int, embeddings: Dict[str, Any]) -> bool:
     """Store message embeddings in database.
     
     Args:
-        db_session: Active database session
+        db_client: ChromaDB client instance
         message_id: ID of the message these embeddings belong to
         embeddings: Processed embedding data
         
@@ -46,10 +43,6 @@ def store_embeddings(db_session: Dict[str, Any], message_id: int, embeddings: Di
         True if storage successful, False otherwise
     """
     logger.info("store_embeddings - not implemented")
-    
-    if not db_session.get("connected", False):
-        logger.warning("Database session not connected")
-        return False
     
     # Placeholder: Would insert embeddings into embeddings table
     text_embedding = embeddings.get('text_embedding')
@@ -64,11 +57,11 @@ def store_embeddings(db_session: Dict[str, Any], message_id: int, embeddings: Di
     return True
 
 
-def store_extractions(db_session: Dict[str, Any], message_id: int, extractions: Dict[str, Any]) -> bool:
+def store_extractions(db_client: Client, message_id: int, extractions: Dict[str, Any]) -> bool:
     """Store extracted content in database.
     
     Args:
-        db_session: Active database session
+        db_client: ChromaDB client instance
         message_id: ID of the message this extraction data belongs to
         extractions: Processed extraction data
         
@@ -76,10 +69,6 @@ def store_extractions(db_session: Dict[str, Any], message_id: int, extractions: 
         True if storage successful, False otherwise
     """
     logger.info("store_extractions - not implemented")
-    
-    if not db_session.get("connected", False):
-        logger.warning("Database session not connected")
-        return False
     
     # Placeholder: Would insert extractions into various tables
     urls = extractions.get('urls', [])
@@ -106,7 +95,7 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
     """Store complete processed message data in database.
     
     Coordinates storage of all message components including metadata,
-    embeddings, and extracted content using database session from setup_db.
+    embeddings, and extracted content using ChromaDB client from setup_db.
     
     Args:
         processed_data: Complete processed message data
@@ -128,30 +117,26 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
         logger.error("No message ID found in processed data")
         return False
     
-    try:
-        with get_db() as db_session:
-            success = True
+    db_client = get_db()
+    success = True
+    
+    # Store core message data
+    if not store_message_data(db_client, message_metadata):
+        logger.error(f"Failed to store message data for message {message_id}")
+        success = False
+    
+    # Store embeddings if available
+    if embeddings and not store_embeddings(db_client, message_id, embeddings):
+        logger.error(f"Failed to store embeddings for message {message_id}")
+        success = False
+    
+    # Store extractions if available
+    if extractions and not store_extractions(db_client, message_id, extractions):
+        logger.error(f"Failed to store extractions for message {message_id}")
+        success = False
+    
+    if success:
+        logger.info(f"Successfully stored complete message {message_id}")
+    
+    return success
             
-            # Store core message data
-            if not store_message_data(db_session, message_metadata):
-                logger.error(f"Failed to store message data for message {message_id}")
-                success = False
-            
-            # Store embeddings if available
-            if embeddings and not store_embeddings(db_session, message_id, embeddings):
-                logger.error(f"Failed to store embeddings for message {message_id}")
-                success = False
-            
-            # Store extractions if available
-            if extractions and not store_extractions(db_session, message_id, extractions):
-                logger.error(f"Failed to store extractions for message {message_id}")
-                success = False
-            
-            if success:
-                logger.info(f"Successfully stored complete message {message_id}")
-            
-            return success
-            
-    except Exception as e:
-        logger.error(f"Database session error while storing message {message_id}: {e}")
-        return False
