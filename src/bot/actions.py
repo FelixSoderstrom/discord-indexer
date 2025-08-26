@@ -5,6 +5,8 @@ import sys
 from typing import TYPE_CHECKING
 
 from ..message_processing import MessagePipeline
+from .dm_commands import handle_dm_message
+from .voice_manager import handle_voice_state_update
 
 if TYPE_CHECKING:
     from .client import DiscordBot
@@ -46,7 +48,7 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
 async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> None:
     """Handle new incoming messages.
     
-    Filters out bot messages and processes new user messages through the unified pipeline.
+    Routes DM messages to command handler, server messages to the unified pipeline.
     
     Args:
         bot: DiscordBot instance with message processing pipeline
@@ -58,6 +60,12 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
     if message.author == bot.user:
         return
     
+    # Route DM messages to command handler (bypass pipeline)
+    if message.guild is None:  # DM message
+        await handle_dm_message(bot, message)
+        return
+    
+    # For server messages, continue with pipeline processing
     # Check if pipeline is available
     if not hasattr(bot, 'message_pipeline') or not bot.message_pipeline:
         logger.critical("❌ Message pipeline not available - application is fundamentally broken")
@@ -83,10 +91,29 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
         sys.exit(1)
 
 
+async def on_voice_state_update_handler(
+    bot: "DiscordBot", 
+    member: discord.Member, 
+    before: discord.VoiceState, 
+    after: discord.VoiceState
+) -> None:
+    """Handle voice state updates for automatic session cleanup.
+    
+    Delegates to voice manager for business logic.
+    
+    Args:
+        bot: DiscordBot instance
+        member: Member whose voice state changed
+        before: Voice state before the change
+        after: Voice state after the change
+    """
+    await handle_voice_state_update(bot, member, before, after)
+
+
 def setup_bot_actions(bot: "DiscordBot") -> None:
     """Setup event handlers for the bot.
     
-    Registers Discord event handlers for connection and message processing.
+    Registers Discord event handlers for connection, message processing, and voice functionality.
     
     Args:
         bot: DiscordBot instance to register handlers with
@@ -102,5 +129,10 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
     async def on_message(message: discord.Message) -> None:
         """Event when new message is received."""
         await on_message_handler(bot, message)
+    
+    @bot.event
+    async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None:
+        """Event when user's voice state changes."""
+        await on_voice_state_update_handler(bot, member, before, after)
     
     logger.info("✅ Bot event handlers registered")
