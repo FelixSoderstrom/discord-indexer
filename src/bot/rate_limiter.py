@@ -136,7 +136,7 @@ class DiscordRateLimiter:
         channels: List[discord.TextChannel],
         messages_per_channel: int = 100,
         max_concurrent_channels: int = 5,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[discord.Message]:
         """
         Fetch messages from multiple channels with rate limiting and parallel processing.
 
@@ -159,7 +159,7 @@ class DiscordRateLimiter:
 
         async def fetch_channel_messages(
             channel: discord.TextChannel,
-        ) -> List[Dict[str, Any]]:
+        ) -> List[discord.Message]:
             """Fetch messages from a single channel with rate limiting."""
             async with channel_semaphore:
                 self.logger.debug(f"Fetching messages from #{channel.name}")
@@ -175,16 +175,10 @@ class DiscordRateLimiter:
                 # Execute with rate limiting
                 messages = await self.execute_with_rate_limit(api_call)
 
-                # Process messages (this can be unlimited - no rate limiting needed)
-                processed_messages = []
-                for message in messages:
-                    message_data = self._extract_message_data(message)
-                    processed_messages.append(message_data)
-
                 self.logger.info(
-                    f"Fetched and processed {len(processed_messages)} messages from #{channel.name}"
+                    f"Fetched {len(messages)} messages from #{channel.name}"
                 )
-                return processed_messages
+                return messages
 
         # Fetch from all channels with controlled concurrency
         tasks = [fetch_channel_messages(channel) for channel in channels]
@@ -200,33 +194,10 @@ class DiscordRateLimiter:
             else:
                 all_messages.extend(result)
 
-        self.logger.info(f"Batch fetch complete: {len(all_messages)} total messages")
+        self.logger.info(f"Batch fetch complete: {len(all_messages)} total raw messages")
         return all_messages
 
-    def _extract_message_data(self, message: discord.Message) -> Dict[str, Any]:
-        """
-        Extract relevant data from a Discord message.
 
-        This is a copy of the method from DiscordBot for consistency.
-        """
-        guild_id = message.guild.id if message.guild else None
-        guild_name = message.guild.name if message.guild else None
-
-        return {
-            "id": message.id,
-            "content": message.content,
-            "author": {
-                "id": message.author.id,
-                "name": message.author.name,
-                "display_name": message.author.display_name,
-            },
-            "channel": {"id": message.channel.id, "name": message.channel.name},
-            "guild": {"id": guild_id, "name": guild_name},
-            "timestamp": message.created_at.isoformat(),
-            "attachments": [att.url for att in message.attachments],
-            "has_embeds": len(message.embeds) > 0,
-            "message_type": str(message.type),
-        }
 
     def get_status(self) -> Dict[str, Any]:
         """Get current rate limiter status for monitoring."""

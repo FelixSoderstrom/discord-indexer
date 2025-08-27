@@ -56,7 +56,7 @@ def initialize_db() -> None:
     except ChromaError as e:
         logger.error(f"ChromaDB initialization failed: {e}")
         raise
-    except Exception as e:
+    except (TypeError, ImportError, RuntimeError, AttributeError) as e:
         logger.error(f"Unexpected error during ChromaDB initialization: {e}")
         raise
 

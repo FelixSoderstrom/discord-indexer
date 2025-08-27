@@ -96,7 +96,7 @@ class DiscordLLMHandler:
             else:
                 self.logger.info(f"Model {self.model_name} is available")
 
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, ValueError, KeyError, RuntimeError) as e:
             self.logger.error(f"Error ensuring model availability: {e}")
             raise
 
@@ -208,7 +208,7 @@ Please provide a helpful answer based on this context."""
                 success=True,
             )
 
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, ValueError, KeyError, RuntimeError) as e:
             self.logger.error(f"Error generating response: {e}")
             response_time = (datetime.now() - start_time).total_seconds()
 
@@ -278,7 +278,7 @@ Please provide a helpful answer based on this context."""
                 success=True,
             )
 
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, ValueError, KeyError, RuntimeError) as e:
             self.logger.error(f"Error generating response: {e}")
             response_time = (datetime.now() - start_time).total_seconds()
 
@@ -300,7 +300,7 @@ Please provide a helpful answer based on this context."""
                 options={"num_predict": 10},
             )
             return True
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, ValueError, KeyError, RuntimeError) as e:
             self.logger.error(f"Health check failed: {e}")
             return False
 
@@ -312,6 +312,6 @@ Please provide a helpful answer based on this context."""
                 if model["name"] == self.model_name:
                     return model
             return {}
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, ValueError, KeyError, RuntimeError) as e:
             self.logger.error(f"Error getting model info: {e}")
             return {}

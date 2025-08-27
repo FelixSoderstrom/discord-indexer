@@ -1,10 +1,12 @@
 import asyncio
 import logging
 from typing import NoReturn
+import discord
 from src.config.settings import settings
 from src.bot.client import DiscordBot
 from src.bot.actions import setup_bot_actions
 from src.db import initialize_db
+from chromadb.errors import ChromaError
 
 
 async def main() -> None:
@@ -43,7 +45,8 @@ async def main() -> None:
 
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped by user")
-    except Exception as e:
+    except (discord.LoginFailure, discord.HTTPException, discord.ConnectionClosed, 
+            ValueError, OSError, RuntimeError, ChromaError) as e:
         logger.error(f"Failed to start bot: {e}")
         raise
 

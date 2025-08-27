@@ -194,13 +194,16 @@ class DiscordBot(commands.Bot):
                 self.logger.info(f"Fetching messages from channels {i+1}-{min(i+5, len(channels))} of {len(channels)}")
                 
                 # Fetch messages from this batch of channels
-                batch_messages = await self.rate_limiter.batch_fetch_messages(
+                raw_messages = await self.rate_limiter.batch_fetch_messages(
                     channels=channel_batch,
                     messages_per_channel=1000,
                     max_concurrent_channels=5,
                 )
                 
-                if batch_messages:
+                if raw_messages:
+                    # Process raw messages into structured data
+                    batch_messages = [self._extract_message_data(msg) for msg in raw_messages]
+                    
                     # Send batch to pipeline and wait for completion
                     success = await self.send_batch_to_pipeline(batch_messages)
                     
@@ -218,7 +221,8 @@ class DiscordBot(commands.Bot):
             self.logger.info(f"Historical message processing completed. Total processed: {total_processed}")
             return True
             
-        except Exception as e:
+        except (discord.HTTPException, asyncio.TimeoutError, MemoryError, 
+                ValueError, IndexError, RuntimeError) as e:
             self.logger.error(f"Error during historical message processing: {e}")
             return False
 
@@ -240,11 +244,14 @@ class DiscordBot(commands.Bot):
         )
 
         # Use rate limiter for parallel batch fetching
-        all_messages = await self.rate_limiter.batch_fetch_messages(
+        raw_messages = await self.rate_limiter.batch_fetch_messages(
             channels=channels,
             messages_per_channel=1000,
             max_concurrent_channels=5,  # Fetch from 5 channels simultaneously
         )
+
+        # Process raw messages into structured data
+        all_messages = [self._extract_message_data(msg) for msg in raw_messages]
 
         # Update processed channels list
         for channel in channels:
@@ -267,6 +274,15 @@ class DiscordBot(commands.Bot):
         guild_id = message.guild.id if message.guild else None
         guild_name = message.guild.name if message.guild else None
 
+        # Handle different channel types
+        if isinstance(message.channel, discord.DMChannel):
+            # For DM channels, create a descriptive name
+            other_user = message.channel.recipient
+            channel_name = f"DM with {other_user.name}" if other_user else "DM"
+        else:
+            # For guild channels (TextChannel, etc.)
+            channel_name = getattr(message.channel, 'name', 'Unknown Channel')
+
         return {
             "id": message.id,
             "content": message.content,
@@ -275,7 +291,7 @@ class DiscordBot(commands.Bot):
                 "name": message.author.name,
                 "display_name": message.author.display_name,
             },
-            "channel": {"id": message.channel.id, "name": message.channel.name},
+            "channel": {"id": message.channel.id, "name": channel_name},
             "guild": {"id": guild_id, "name": guild_name},
             "timestamp": message.created_at.isoformat(),
             "attachments": [att.url for att in message.attachments],
