@@ -18,7 +18,7 @@ def store_message_data(db_client: Client, message_data: Dict[str, Any]) -> bool:
     """Store core message data in database.
     
     Args:
-        db_client: ChromaDB client instance
+        db_client: ChromaDB client instance for specific server
         message_data: Processed message metadata
         
     Returns:
@@ -35,7 +35,7 @@ def store_embeddings(db_client: Client, message_id: int, embeddings: Dict[str, A
     """Store message embeddings in database.
     
     Args:
-        db_client: ChromaDB client instance
+        db_client: ChromaDB client instance for specific server
         message_id: ID of the message these embeddings belong to
         embeddings: Processed embedding data
         
@@ -61,7 +61,7 @@ def store_extractions(db_client: Client, message_id: int, extractions: Dict[str,
     """Store extracted content in database.
     
     Args:
-        db_client: ChromaDB client instance
+        db_client: ChromaDB client instance for specific server
         message_id: ID of the message this extraction data belongs to
         extractions: Processed extraction data
         
@@ -95,7 +95,7 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
     """Store complete processed message data in database.
     
     Coordinates storage of all message components including metadata,
-    embeddings, and extracted content using ChromaDB client from setup_db.
+    embeddings, and extracted content using server-specific ChromaDB client.
     
     Args:
         processed_data: Complete processed message data
@@ -111,13 +111,19 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
     extractions = processed_data.get('extractions', {})
     
     message_metadata = metadata.get('message_metadata', {})
+    guild_metadata = metadata.get('guild_metadata', {})
     message_id = message_metadata.get('message_id')
+    server_id = guild_metadata.get('guild_id')
     
     if not message_id:
         logger.error("No message ID found in processed data")
         return False
     
-    db_client = get_db()
+    if not server_id:
+        logger.error("No server ID found in processed data - cannot determine database")
+        return False
+    
+    db_client = get_db(server_id)
     success = True
     
     # Store core message data

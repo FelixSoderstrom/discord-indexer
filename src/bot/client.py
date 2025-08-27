@@ -77,6 +77,22 @@ class DiscordBot(commands.Bot):
             for channel in guild.channels
             if isinstance(channel, discord.TextChannel)
         ]
+    
+    def get_channels_by_guild(self) -> Dict[int, List[discord.TextChannel]]:
+        """Get text channels grouped by guild ID.
+
+        Returns:
+            Dictionary mapping guild IDs to lists of text channels
+        """
+        channels_by_guild = {}
+        for guild in self.guilds:
+            text_channels = [
+                channel for channel in guild.channels
+                if isinstance(channel, discord.TextChannel)
+            ]
+            if text_channels:
+                channels_by_guild[guild.id] = text_channels
+        return channels_by_guild
 
     async def get_channel_messages(
         self, channel_id: int, limit: int = 100
@@ -164,10 +180,10 @@ class DiscordBot(commands.Bot):
         return success
     
     async def process_historical_messages_through_pipeline(self) -> bool:
-        """Process all historical messages through the pipeline with batching and backpressure.
+        """Process all historical messages through the pipeline with server separation.
         
-        Fetches historical messages in batches and sends them to pipeline
-        with proper coordination to prevent overwhelming the system.
+        Processes each server separately to ensure messages go to correct databases.
+        Maintains batching within each server for efficient processing.
         
         Returns:
             True if all historical messages processed successfully, False if failed
@@ -176,49 +192,59 @@ class DiscordBot(commands.Bot):
             self.logger.error("Message pipeline not available for historical processing")
             return False
             
-        channels = self.get_all_channels()
+        channels_by_guild = self.get_channels_by_guild()
         
-        if not channels:
+        if not channels_by_guild:
             self.logger.info("No channels available for historical processing")
             return True
 
-        self.logger.info(f"Processing {len(channels)} channels for historical messages through pipeline...")
+        total_guilds = len(channels_by_guild)
+        total_channels = sum(len(channels) for channels in channels_by_guild.values())
+        self.logger.info(f"Processing {total_channels} channels across {total_guilds} servers for historical messages...")
 
         try:
-            # Process channels in batches to implement backpressure
-            total_processed = 0
+            overall_total_processed = 0
             
-            for i in range(0, len(channels), 5):  # Process 5 channels at a time
-                channel_batch = channels[i:i+5]
+            # Process each server separately
+            for guild_id, guild_channels in channels_by_guild.items():
+                self.logger.info(f"Processing server {guild_id} with {len(guild_channels)} channels")
+                server_total_processed = 0
                 
-                self.logger.info(f"Fetching messages from channels {i+1}-{min(i+5, len(channels))} of {len(channels)}")
-                
-                # Fetch messages from this batch of channels
-                raw_messages = await self.rate_limiter.batch_fetch_messages(
-                    channels=channel_batch,
-                    messages_per_channel=1000,
-                    max_concurrent_channels=5,
-                )
-                
-                if raw_messages:
-                    # Process raw messages into structured data
-                    batch_messages = [self._extract_message_data(msg) for msg in raw_messages]
+                # Process channels in batches within this server
+                for i in range(0, len(guild_channels), 5):  # Process 5 channels at a time
+                    channel_batch = guild_channels[i:i+5]
                     
-                    # Send batch to pipeline and wait for completion
-                    success = await self.send_batch_to_pipeline(batch_messages)
+                    self.logger.info(f"Server {guild_id}: Fetching messages from channels {i+1}-{min(i+5, len(guild_channels))} of {len(guild_channels)}")
                     
-                    if not success:
-                        self.logger.error("Failed to process historical message batch")
-                        return False
+                    # Fetch messages from this batch of channels
+                    raw_messages = await self.rate_limiter.batch_fetch_messages(
+                        channels=channel_batch,
+                        messages_per_channel=1000,
+                        max_concurrent_channels=5,
+                    )
                     
-                    total_processed += len(batch_messages)
-                    self.logger.info(f"Processed {total_processed} historical messages so far")
+                    if raw_messages:
+                        # Process raw messages into structured data
+                        batch_messages = [self._extract_message_data(msg) for msg in raw_messages]
+                        
+                        # Send batch to pipeline and wait for completion
+                        success = await self.send_batch_to_pipeline(batch_messages)
+                        
+                        if not success:
+                            self.logger.error(f"Failed to process historical message batch for server {guild_id}")
+                            return False
+                        
+                        server_total_processed += len(batch_messages)
+                        overall_total_processed += len(batch_messages)
+                        self.logger.info(f"Server {guild_id}: Processed {server_total_processed} messages so far")
+                    
+                    # Update processed channels list
+                    for channel in channel_batch:
+                        self.processed_channels.append(channel.id)
                 
-                # Update processed channels list
-                for channel in channel_batch:
-                    self.processed_channels.append(channel.id)
+                self.logger.info(f"Server {guild_id} processing completed. Processed {server_total_processed} messages")
 
-            self.logger.info(f"Historical message processing completed. Total processed: {total_processed}")
+            self.logger.info(f"All servers processed successfully. Total processed: {overall_total_processed} messages")
             return True
             
         except (discord.HTTPException, asyncio.TimeoutError, MemoryError, 

@@ -8,6 +8,7 @@ embedding, extraction, metadata preparation, and storage.
 import asyncio
 import logging
 from typing import Dict, Any, Optional, List
+from collections import defaultdict
 
 from .embedding import process_message_embeddings
 from .extraction import process_message_extractions
@@ -102,6 +103,28 @@ class MessagePipeline:
         processed_data['processing_status'] = 'completed'
         return processed_data
     
+    def _group_messages_by_server(self, messages: List[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
+        """Group messages by server ID for separate processing.
+        
+        Args:
+            messages: List of message data dictionaries
+            
+        Returns:
+            Dictionary mapping server IDs to lists of messages
+        """
+        grouped_messages = defaultdict(list)
+        
+        for message in messages:
+            guild_data = message.get('guild', {})
+            server_id = guild_data.get('id')
+            
+            if server_id:
+                grouped_messages[server_id].append(message)
+            else:
+                logger.warning(f"Message {message.get('id', 'unknown')} has no server ID - skipping")
+        
+        return dict(grouped_messages)
+    
     def _sort_messages_chronologically(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Sort messages in chronological order by timestamp.
         
@@ -116,8 +139,8 @@ class MessagePipeline:
     async def process_messages(self, messages: List[Dict[str, Any]]) -> bool:
         """Process a list of Discord messages through the complete pipeline.
         
-        Main entry point for message processing. Sorts messages chronologically,
-        then processes each message sequentially through the pipeline.
+        Main entry point for message processing. Groups messages by server ID,
+        then processes each server separately with chronological sorting.
         
         Args:
             messages: List of raw message data dictionaries from Discord
@@ -134,39 +157,49 @@ class MessagePipeline:
             
         logger.info(f"Processing batch of {len(messages)} messages")
     
-        # Sort messages chronologically to ensure proper processing order
-        sorted_messages = self._sort_messages_chronologically(messages)
-        logger.info("Messages sorted chronologically")
+        # Group messages by server ID to process each server separately
+        grouped_by_server = self._group_messages_by_server(messages)
+        logger.info(f"Messages grouped by server: {len(grouped_by_server)} servers")
         
-        # Process each message sequentially
-        for i, message_data in enumerate(sorted_messages, 1):
-            message_id = message_data.get('id', 'unknown')
-            logger.info(f"Processing message {i}/{len(sorted_messages)} - ID: {message_id}")
+        # Process each server separately
+        for server_id, server_messages in grouped_by_server.items():
+            logger.info(f"Processing {len(server_messages)} messages from server {server_id}")
             
-            # Analyze message content to determine processing requirements
-            content_analysis = self._check_message_content(message_data)
+            # Sort messages chronologically within this server
+            sorted_messages = self._sort_messages_chronologically(server_messages)
+            logger.info(f"Messages sorted chronologically for server {server_id}")
             
-            # Skip empty messages
-            if content_analysis['is_empty']:
-                logger.info("Skipping empty message")
-                continue
+            # Process each message sequentially within this server
+            for i, message_data in enumerate(sorted_messages, 1):
+                message_id = message_data.get('id', 'unknown')
+                logger.info(f"Processing server {server_id} message {i}/{len(sorted_messages)} - ID: {message_id}")
+                
+                # Analyze message content to determine processing requirements
+                content_analysis = self._check_message_content(message_data)
+                
+                # Skip empty messages
+                if content_analysis['is_empty']:
+                    logger.info("Skipping empty message")
+                    continue
+                
+                # Route message through appropriate processing steps
+                processed_data = self._route_message_processing(message_data, content_analysis)
+                
+                # Store processed data to database using server-specific client
+                logger.info("Storing processed message to database")
+                storage_success = store_complete_message(processed_data)
+                
+                if storage_success:
+                    self.messages_processed += 1
+                    logger.debug(f"Message {message_id} processed successfully. Total processed: {self.messages_processed}")
+                else:
+                    self.messages_failed += len(server_messages)  # Fail entire batch if any message fails
+                    logger.error(f"Failed to store message {message_id} from server {server_id}")
+                    return False
             
-            # Route message through appropriate processing steps
-            processed_data = self._route_message_processing(message_data, content_analysis)
-            
-            # Store processed data to database using context manager
-            logger.info("Storing processed message to database")
-            storage_success = store_complete_message(processed_data)
-            
-            if storage_success:
-                self.messages_processed += 1
-                logger.debug(f"Message {message_id} processed successfully. Total processed: {self.messages_processed}")
-            else:
-                self.messages_failed += 1
-                logger.error(f"Failed to store message {message_id}")
-                return False
+            logger.info(f"Server {server_id} processing completed successfully. Processed {len(sorted_messages)} messages")
         
-        logger.info(f"Batch processing completed successfully. Processed {len(sorted_messages)} messages")
+        logger.info(f"All servers processed successfully. Total processed: {len(messages)} messages")
         
         # Signal completion if event is available
         if self.completion_event:

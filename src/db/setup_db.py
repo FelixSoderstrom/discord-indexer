@@ -1,13 +1,13 @@
 """Database connection and client management for ChromaDB.
 
 This module handles ChromaDB client initialization and provides centralized
-access to the database client throughout the application. The client is
-initialized once at startup and reused across all database operations.
+access to server-specific database clients throughout the application. Each
+server gets its own database with lazy loading for memory efficiency.
 """
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 import chromadb
 from chromadb import Client
 from chromadb.errors import ChromaError
@@ -15,33 +15,26 @@ from chromadb.errors import ChromaError
 
 logger = logging.getLogger(__name__)
 
-# Module-level client instance
-_client: Optional[Client] = None
+# Module-level server-specific client instances
+_clients: Dict[int, Client] = {}
 
 
 def initialize_db() -> None:
-    """Initialize ChromaDB persistent client.
+    """Initialize the database directory structure.
 
-    Creates a persistent ChromaDB client and stores it for application use.
-    Should be called once during application startup.
+    Creates the base databases directory structure for server-specific databases.
+    Individual server databases are created lazily when first accessed.
 
     Raises:
         OSError: If database directory cannot be created or accessed
         PermissionError: If insufficient permissions for database directory
-        ChromaError: If ChromaDB client initialization fails
     """
-    global _client
-
-    if _client is not None:
-        logger.warning("Database client already initialized")
-        return
-
-    # Setup database directory
-    db_path = Path(__file__).parent / "chroma_data"
+    # Setup base databases directory
+    databases_path = Path(__file__).parent / "databases"
 
     try:
-        db_path.mkdir(exist_ok=True)
-        logger.info(f"Database directory ready: {db_path}")
+        databases_path.mkdir(exist_ok=True)
+        logger.info(f"Database directory structure ready: {databases_path}")
     except PermissionError as e:
         logger.error(f"Insufficient permissions for database directory: {e}")
         raise
@@ -49,33 +42,52 @@ def initialize_db() -> None:
         logger.error(f"Failed to create database directory: {e}")
         raise
 
-    # Initialize ChromaDB client
-    try:
-        _client = chromadb.PersistentClient(path=str(db_path))
-        logger.info("ChromaDB client initialized successfully")
-    except ChromaError as e:
-        logger.error(f"ChromaDB initialization failed: {e}")
-        raise
-    except (TypeError, ImportError, RuntimeError, AttributeError) as e:
-        logger.error(f"Unexpected error during ChromaDB initialization: {e}")
-        raise
 
+def get_db(server_id: int) -> Client:
+    """Get the ChromaDB client for a specific server.
 
-def get_db() -> Client:
-    """Get the initialized ChromaDB client.
+    Uses lazy loading to create server-specific database clients on demand.
+    Each server gets its own isolated database in databases/{server_id}/chroma_data.
 
-    Returns the same client instance throughout the application runtime.
-    Must be called after initialize_db() has been executed.
+    Args:
+        server_id: Discord server/guild ID
 
     Returns:
-        ChromaDB client instance
+        ChromaDB client instance for the specified server
 
     Raises:
-        RuntimeError: If client has not been initialized
+        OSError: If database directory cannot be created or accessed
+        PermissionError: If insufficient permissions for database directory
+        ChromaError: If ChromaDB client initialization fails
     """
-    if _client is None:
-        raise RuntimeError(
-            "Database client not initialized. Call initialize_db() first."
-        )
+    global _clients
 
-    return _client
+    # Return existing client if already initialized
+    if server_id in _clients:
+        return _clients[server_id]
+
+    # Create server-specific database directory
+    server_db_path = Path(__file__).parent / "databases" / str(server_id) / "chroma_data"
+
+    try:
+        server_db_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Server {server_id} database directory ready: {server_db_path}")
+    except PermissionError as e:
+        logger.error(f"Insufficient permissions for server {server_id} database directory: {e}")
+        raise
+    except OSError as e:
+        logger.error(f"Failed to create server {server_id} database directory: {e}")
+        raise
+
+    # Initialize ChromaDB client for this server
+    try:
+        client = chromadb.PersistentClient(path=str(server_db_path))
+        _clients[server_id] = client
+        logger.info(f"ChromaDB client initialized successfully for server {server_id}")
+        return client
+    except ChromaError as e:
+        logger.error(f"ChromaDB initialization failed for server {server_id}: {e}")
+        raise
+    except (TypeError, ImportError, RuntimeError, AttributeError) as e:
+        logger.error(f"Unexpected error during ChromaDB initialization for server {server_id}: {e}")
+        raise
