@@ -56,8 +56,46 @@ def analyze_link_content(url: str) -> Optional[Dict[str, Any]]:
     """
     logger.info("analyze_link_content - not implemented")
     
-    # TODO: Implement actual link analysis
-    # (decription, content_type) = SomeClass.SomeMethod(url)
+    # =============================================================================
+    # SCRAPER INTEGRATION POINT - This is where the scraper is expected to go
+    # =============================================================================
+    # Input: url (string)
+    # Scraper Process:
+    #   1. Fetch HTML content from URL
+    #   2. Clean HTML (remove all HTML tags, keep only text content)
+    #   3. Return cleaned_html_content (string)
+    #
+    # Example integration:
+    # cleaned_html_content: str = scraper_class.scrape_page(url)
+    
+    # =============================================================================
+    # LINK ANALYZER INTEGRATION POINT - This is where the cleaned HTML is expected to be accessible
+    # =============================================================================
+    # Input: cleaned_html_content (string from scraper)
+    # LinkAnalyzer Process:
+    #   1. Take cleaned HTML content (no HTML tags)
+    #   2. Extract relevant content using LLM agent
+    #   3. Return structured content in template format
+    #
+    # Example integration:
+    # relevant_content: str = await agent.extract_relevant_content(cleaned_html_content)
+    
+    # =============================================================================
+    # OUTPUT - This is where we have the relevant content (LLM output)
+    # =============================================================================
+    # The relevant_content string contains structured extracted information ready for:
+    #   1. Embedding generation (in message_processing/embedding.py)
+    #   2. Storage in ChromaDB with message metadata
+    #   3. Future retrieval by other agents for question answering
+    #
+    # Expected relevant_content format:
+    # Topic: [Main subject]
+    # Type: [Content category] 
+    # Summary: [2-3 sentence overview]
+    # Key points: [3-5 brief bullet points]
+    # Entities: [Important names/terms]
+    
+    # TODO: Replace this placeholder with actual scraper + LinkAnalyzer integration
     return {
         'url': url,
         'description': 'Summary of the content',
