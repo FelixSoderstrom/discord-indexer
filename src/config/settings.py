@@ -12,6 +12,7 @@ class BotSettings(BaseSettings):
     DISCORD_TOKEN: str
     COMMAND_PREFIX: str = "!"
     DEBUG: bool = False
+    LLM_MODEL_NAME: str
     
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
     
