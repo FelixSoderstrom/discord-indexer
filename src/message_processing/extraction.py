@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Optional
 import re
 
 from src.message_processing.scraper import get_content
+from src.exceptions.message_processing import MessageProcessingError
 
 
 logger = logging.getLogger(__name__)
@@ -58,8 +59,12 @@ def analyze_link_content(url: str) -> Optional[Dict[str, Any]]:
     """
     logger.info(f"Scraping content from URL: {url}")
     
-    content = get_content(url)
-    logger.info(f"Successfully scraped content from {url} ({len(content)} characters)")
+    try:
+        content = get_content(url)
+        logger.info(f"Successfully scraped content from {url} ({len(content)} characters)")
+    except RuntimeError as e:
+        logger.warning(f"Failed to scrape content from {url}: {e}")
+        raise MessageProcessingError()
     
 
 

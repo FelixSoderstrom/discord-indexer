@@ -1,8 +1,10 @@
 import logging
 import re
+import trafilatura
 from typing import Optional
 
-import trafilatura
+from src.exceptions.message_processing import MessageProcessingError
+
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +18,6 @@ def get_content(url: str) -> str:
 def _scrape_page(url: str) -> str:
     """Scrapes the page for the given URL using trafilatura"""
     try:
-        # Use standard trafilatura API
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
             logger.error(f"Failed to fetch URL: {url}")
@@ -26,7 +27,7 @@ def _scrape_page(url: str) -> str:
         
     except Exception as e:
         logger.error(f"Error scraping page {url}: {e}")
-        return None
+        raise MessageProcessingError(f"Error scraping page {url}: {e}")
 
 def _clean_page(html_content: str, url: str) -> str:
     """Extracts and cleans main content from HTML using trafilatura"""
@@ -34,16 +35,12 @@ def _clean_page(html_content: str, url: str) -> str:
         return ""
     
     try:
-        # Use trafilatura.extract() to get clean main content
         extracted_content = trafilatura.extract(html_content, url=url)
         if not extracted_content:
             logger.error(f"Failed to extract content from HTML for URL: {url}")
             raise RuntimeError(f"Failed to extract content from HTML for URL: {url}")
         
-        # Minimal additional cleaning
         cleaned_content = extracted_content.strip()
-        
-        # Remove excessive whitespace and normalize line breaks
         cleaned_content = re.sub(r'\n\s*\n', '\n\n', cleaned_content)
         cleaned_content = re.sub(r'[ \t]+', ' ', cleaned_content)
         
@@ -51,4 +48,4 @@ def _clean_page(html_content: str, url: str) -> str:
         
     except Exception as e:
         logger.error(f"Error cleaning content for URL {url}: {e}")
-        return None
+        raise MessageProcessingError(f"Failed to clean content for URL {url}: {e}")

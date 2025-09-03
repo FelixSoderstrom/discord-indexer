@@ -14,6 +14,7 @@ from .embedding import process_message_embeddings
 from .extraction import process_message_extractions
 from .metadata import process_message_metadata
 from .storage import store_complete_message
+from src.exceptions.message_processing import MessageProcessingError
 
 
 logger = logging.getLogger(__name__)
@@ -174,28 +175,34 @@ class MessagePipeline:
                 message_id = message_data.get('id', 'unknown')
                 logger.info(f"Processing server {server_id} message {i}/{len(sorted_messages)} - ID: {message_id}")
                 
-                # Analyze message content to determine processing requirements
-                content_analysis = self._check_message_content(message_data)
+                try:
+                    # Analyze message content to determine processing requirements
+                    content_analysis = self._check_message_content(message_data)
+                    
+                    # Skip empty messages
+                    if content_analysis['is_empty']:
+                        logger.info("Skipping empty message")
+                        continue
+                    
+                    # Route message through appropriate processing steps
+                    processed_data = self._route_message_processing(message_data, content_analysis)
+                    
+                    # Store processed data to database using server-specific client
+                    logger.info("Storing processed message to database")
+                    storage_success = store_complete_message(processed_data)
+                    
+                    if storage_success:
+                        self.messages_processed += 1
+                        logger.debug(f"Message {message_id} processed successfully. Total processed: {self.messages_processed}")
+                    else:
+                        self.messages_failed += 1
+                        logger.error(f"Failed to store message {message_id} from server {server_id}")
+                        continue
                 
-                # Skip empty messages
-                if content_analysis['is_empty']:
-                    logger.info("Skipping empty message")
+                except MessageProcessingError:
+                    logger.warning(f"Message failed to process, skipping message {message_id}")
+                    self.messages_failed += 1
                     continue
-                
-                # Route message through appropriate processing steps
-                processed_data = self._route_message_processing(message_data, content_analysis)
-                
-                # Store processed data to database using server-specific client
-                logger.info("Storing processed message to database")
-                storage_success = store_complete_message(processed_data)
-                
-                if storage_success:
-                    self.messages_processed += 1
-                    logger.debug(f"Message {message_id} processed successfully. Total processed: {self.messages_processed}")
-                else:
-                    self.messages_failed += len(server_messages)  # Fail entire batch if any message fails
-                    logger.error(f"Failed to store message {message_id} from server {server_id}")
-                    return False
             
             logger.info(f"Server {server_id} processing completed successfully. Processed {len(sorted_messages)} messages")
         
