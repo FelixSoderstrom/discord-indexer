@@ -58,14 +58,10 @@ def analyze_link_content(url: str) -> Optional[Dict[str, Any]]:
     """
     logger.info(f"Scraping content from URL: {url}")
     
-    try:
-        content = get_content(url)
-        logger.info(f"Successfully scraped content from {url} ({len(content)} characters)")
-    except Exception as e:
-        logger.warning("Failed scraping content from URL: {url}")
-        return None
+    content = get_content(url)
+    logger.info(f"Successfully scraped content from {url} ({len(content)} characters)")
     
-    
+
 
     # =============================================================================
     # LINK ANALYZER INTEGRATION POINT - This is where the cleaned HTML is expected to be accessible

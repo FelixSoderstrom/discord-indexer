@@ -20,13 +20,13 @@ def _scrape_page(url: str) -> str:
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
             logger.error(f"Failed to fetch URL: {url}")
-            raise RuntimeError(f"Failed to fetch URL: {url}")
+            return None
         
         return downloaded
         
     except Exception as e:
         logger.error(f"Error scraping page {url}: {e}")
-        raise RuntimeError(f"Error scraping page {url}: {e}")
+        return None
 
 def _clean_page(html_content: str, url: str) -> str:
     """Extracts and cleans main content from HTML using trafilatura"""
@@ -51,4 +51,4 @@ def _clean_page(html_content: str, url: str) -> str:
         
     except Exception as e:
         logger.error(f"Error cleaning content for URL {url}: {e}")
-        raise RuntimeError(f"Error cleaning content for URL {url}: {e}")
+        return None
