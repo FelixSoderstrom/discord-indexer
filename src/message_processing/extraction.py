@@ -64,6 +64,8 @@ def analyze_link_content(url: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.warning("Failed scraping content from URL: {url}")
         return None
+    
+    
 
     # =============================================================================
     # LINK ANALYZER INTEGRATION POINT - This is where the cleaned HTML is expected to be accessible
