@@ -4,3 +4,5 @@ pydantic-settings==2.10.1
 python-dotenv==1.1.1
 chromadb==1.0.20
 ollama>=0.3.0
+trafilatura==2.0.0
+lxml_html_clean
