@@ -10,6 +10,7 @@ import re
 
 from src.message_processing.scraper import get_content
 from src.exceptions.message_processing import MessageProcessingError
+from src.llm.agents.link_analyzer import LinkAnalyzer
 
 
 logger = logging.getLogger(__name__)
@@ -48,15 +49,16 @@ def extract_mentions(message_content: str) -> Dict[str, List[str]]:
     }
 
 
-def analyze_link_content(url: str) -> Optional[Dict[str, Any]]:
-    """Analyze and extract metadata from a URL.
+async def analyze_link_content(url: str) -> Optional[str]:
+    """Analyze and extract summary from a URL.
     
     Args:
-        url: URL to analyze and extract metadata from
+        url: URL to analyze and extract summary from
         
     Returns:
-        None until LinkAnalyzer agent is integrated
+        LLM-generated summary string for embedding, None if processing fails
     """
+    link_analyzer = LinkAnalyzer()
     logger.info(f"Scraping content from URL: {url}")
     
     try:
@@ -64,52 +66,29 @@ def analyze_link_content(url: str) -> Optional[Dict[str, Any]]:
         logger.info(f"Successfully scraped content from {url} ({len(content)} characters)")
     except RuntimeError as e:
         logger.warning(f"Failed to scrape content from {url}: {e}")
-        raise MessageProcessingError()
+        raise MessageProcessingError(f"Failed to scrape URL {url}: {e}")
     
-
-
-    # =============================================================================
-    # LINK ANALYZER INTEGRATION POINT - This is where the cleaned HTML is expected to be accessible
-    # =============================================================================
-    # Input: cleaned_html_content (string from scraper) - NOW AVAILABLE
-    # LinkAnalyzer Process:
-    #   1. Take cleaned HTML content (no HTML tags)
-    #   2. Extract relevant content using LLM agent
-    #   3. Return structured content in template format
-    #
-    # Example integration:
-    # relevant_content: str = await agent.extract_relevant_content(cleaned_html_content)
-    
-    # =============================================================================
-    # OUTPUT - This is where we have the relevant content (LLM output)
-    # =============================================================================
-    # The relevant_content string contains structured extracted information ready for:
-    #   1. Embedding generation (in message_processing/embedding.py)
-    #   2. Storage in ChromaDB with message metadata
-    #   3. Future retrieval by other agents for question answering
-    #
-    # Expected relevant_content format:
-    # Topic: [Main subject]
-    # Type: [Content category] 
-    # Summary: [2-3 sentence overview]
-    # Key points: [3-5 brief bullet points]
-    # Entities: [Important names/terms]
-    
-    # TODO: Integrate LinkAnalyzer agent to process cleaned_html_content
-    # For now, return None until agent integration is complete
+    try:
+        summary = await link_analyzer.extract_relevant_content(content)
+        logger.info(f"Successfully extracted summary from {url} ({len(summary)} characters)")
+        return summary
+    except Exception as e:
+        logger.error(f"Failed to extract content from {url}: {e}")
+        raise MessageProcessingError(f"Failed to analyze URL {url}: {e}")
         
 
 
-def process_message_extractions(message_data: Dict[str, Any]) -> Dict[str, Any]:
+async def process_message_extractions(message_data: Dict[str, Any]) -> Dict[str, Any]:
     """Process all extraction requirements for a message.
     
-    Coordinates URL extraction, mention extraction, and content analysis.
+    Coordinates URL extraction, mention extraction, and link content analysis.
+    Generates summaries for embedding and stores URLs as metadata.
     
     Args:
         message_data: Complete message data dictionary
         
     Returns:
-        Dictionary containing extraction results
+        Dictionary containing extraction results with summaries and metadata
     """
     
     extraction_results = {
@@ -118,11 +97,12 @@ def process_message_extractions(message_data: Dict[str, Any]) -> Dict[str, Any]:
             'user_mentions': [],
             'channel_mentions': []
         },
-        'link_metadata': [],
+        'link_summaries_combined': '',  # Combined summaries for embedding
         'extraction_metadata': {
             'urls_found': 0,
             'mentions_found': 0,
-            'links_analyzed': 0
+            'links_analyzed': 0,
+            'summaries_generated': 0
         }
     }
     
@@ -134,13 +114,25 @@ def process_message_extractions(message_data: Dict[str, Any]) -> Dict[str, Any]:
         extraction_results['urls'] = urls
         extraction_results['extraction_metadata']['urls_found'] = len(urls)
         
-        # Analyze each URL - NOT IMPLEMENTED
+        # Analyze each URL and collect summaries
+        summaries = []
         for url in urls:
-            link_analysis = analyze_link_content(url)
-            if link_analysis:
-                extraction_results['link_metadata'].append(link_analysis)
+            try:
+                summary = await analyze_link_content(url)
+                if summary:
+                    summaries.append(summary)
+                    extraction_results['extraction_metadata']['summaries_generated'] += 1
+                    logger.info(f"Generated summary for {url}")
+            except MessageProcessingError as e:
+                logger.warning(f"Skipping URL {url} due to processing error: {e}")
+                continue
         
-        extraction_results['extraction_metadata']['links_analyzed'] = len(extraction_results['link_metadata'])
+        # Combine all summaries with newlines for embedding
+        if summaries:
+            extraction_results['link_summaries_combined'] = '\n\n'.join(summaries)
+            logger.info(f"Combined {len(summaries)} link summaries for embedding")
+        
+        extraction_results['extraction_metadata']['links_analyzed'] = len(summaries)
         
         # Extract mentions
         mentions = extract_mentions(message_content)

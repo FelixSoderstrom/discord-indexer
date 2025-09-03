@@ -68,7 +68,7 @@ class MessagePipeline:
         logger.debug(f"Content analysis: {content_analysis}")
         return content_analysis
     
-    def _route_message_processing(self, message_data: Dict[str, Any], content_analysis: Dict[str, bool]) -> Dict[str, Any]:
+    async def _route_message_processing(self, message_data: Dict[str, Any], content_analysis: Dict[str, bool]) -> Dict[str, Any]:
         """Route message through appropriate processing steps based on content.
         
         Args:
@@ -91,15 +91,17 @@ class MessagePipeline:
         logger.info("Processing message metadata")
         processed_data['metadata'] = process_message_metadata(message_data)
         
+        # Process extractions if there are URLs or mentions
+        extractions = {}
+        if content_analysis['has_urls'] or content_analysis['has_mentions']:
+            logger.info("Processing message extractions")
+            extractions = await process_message_extractions(message_data)
+            processed_data['extractions'] = extractions
+        
         # Process embeddings if there's text or images
         if content_analysis['has_text'] or content_analysis['has_images']:
             logger.info("Processing message embeddings")
-            processed_data['embeddings'] = process_message_embeddings(message_data)
-        
-        # Process extractions if there are URLs or mentions
-        if content_analysis['has_urls'] or content_analysis['has_mentions']:
-            logger.info("Processing message extractions")
-            processed_data['extractions'] = process_message_extractions(message_data)
+            processed_data['embeddings'] = process_message_embeddings(message_data, extractions)
         
         processed_data['processing_status'] = 'completed'
         return processed_data
@@ -185,7 +187,7 @@ class MessagePipeline:
                         continue
                     
                     # Route message through appropriate processing steps
-                    processed_data = self._route_message_processing(message_data, content_analysis)
+                    processed_data = await self._route_message_processing(message_data, content_analysis)
                     
                     # Store processed data to database using server-specific client
                     logger.info("Storing processed message to database")
