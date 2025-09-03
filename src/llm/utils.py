@@ -1,7 +1,9 @@
 import ollama  # type: ignore[import-not-found]
 import logging
 import os
-from typing import Dict, Any
+import subprocess
+import re
+from typing import Dict, Any, Optional
 
 
 logger = logging.getLogger(__name__)
@@ -94,3 +96,60 @@ def get_model_info(model_name: str) -> Dict[str, Any]:
     except (ConnectionError, TimeoutError, OSError, ValueError, KeyError, RuntimeError) as e:
         logger.error(f"Error getting model info: {e}")
         return {}
+
+
+# Cache for model context windows to avoid repeated subprocess calls
+_model_context_cache: Dict[str, int] = {}
+
+
+def get_model_max_context(model_name: str) -> int:
+    """
+    Get the maximum context window size for the specified model
+    
+    Args:
+        model_name: Name of the model to get context window for
+        
+    Returns:
+        Maximum context window size in tokens, defaults to 2048 if detection fails
+    """
+    # Check cache first
+    if model_name in _model_context_cache:
+        logger.debug(f"Using cached context window for {model_name}: {_model_context_cache[model_name]}")
+        return _model_context_cache[model_name]
+    
+    try:
+        # Use ollama show command to get detailed model information
+        result = subprocess.run(
+            ['ollama', 'show', model_name], 
+            capture_output=True, 
+            text=True, 
+            timeout=30
+        )
+        
+        if result.returncode != 0:
+            logger.warning(f"Failed to get model info for {model_name}: {result.stderr}")
+            # Cache default and return
+            _model_context_cache[model_name] = 2048
+            return 2048
+        
+        # Parse context length from output
+        # Looking for patterns like "context length    32768" or "context length: 32768"
+        context_match = re.search(r'context\s+length[:\s]+(\d+)', result.stdout, re.IGNORECASE)
+        
+        if context_match:
+            context_window = int(context_match.group(1))
+            logger.info(f"Detected context window for {model_name}: {context_window} tokens")
+            # Cache the result
+            _model_context_cache[model_name] = context_window
+            return context_window
+        else:
+            logger.warning(f"Could not parse context length from model info for {model_name}")
+            # Cache default and return
+            _model_context_cache[model_name] = 2048
+            return 2048
+            
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, ValueError) as e:
+        logger.error(f"Error getting context window for {model_name}: {e}")
+        # Cache default and return
+        _model_context_cache[model_name] = 2048
+        return 2048

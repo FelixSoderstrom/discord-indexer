@@ -5,7 +5,7 @@ from typing import Dict, Any, List
 from dataclasses import dataclass
 from datetime import datetime
 
-from .utils import get_ollama_client
+from .utils import get_ollama_client, get_model_max_context
 
 try:
     from ..config.settings import settings
@@ -58,6 +58,9 @@ def generate_completion_sync(
     try:
         client = get_ollama_client()
         
+        # Get the model's maximum context window
+        num_ctx = get_model_max_context(model_name)
+        
         # Parse prompt into messages (simple implementation - assumes single user message)
         messages = [{"role": "user", "content": prompt}]
         
@@ -67,6 +70,7 @@ def generate_completion_sync(
             options={
                 "temperature": temperature,
                 "num_predict": max_tokens,
+                "num_ctx": num_ctx,
                 "top_p": 0.9,
                 "repeat_penalty": 1.1,
             },
@@ -125,12 +129,16 @@ def generate_completion_with_messages_sync(
     try:
         client = get_ollama_client()
         
+        # Get the model's maximum context window
+        num_ctx = get_model_max_context(model_name)
+        
         response = client.chat(
             model=model_name,
             messages=messages,
             options={
                 "temperature": temperature,
                 "num_predict": max_tokens,
+                "num_ctx": num_ctx,
                 "top_p": 0.9,
                 "repeat_penalty": 1.1,
             },

@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 from typing import Dict, Optional
@@ -41,17 +40,16 @@ class LinkAnalyzer:
         ensure_model_available(self.model_name)
     
     def _load_system_prompt(self) -> str:
-        """Load system prompt from JSON file"""
+        """Load system prompt from text file"""
         try:
             prompt_file = os.path.join(
                 os.path.dirname(__file__), 
                 "sys_prompts", 
-                "link_analyzer.json"
+                "link_analyzer.txt"
             )
             with open(prompt_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data["system_prompt"]
-        except (FileNotFoundError, KeyError, json.JSONDecodeError) as e:
+                return f.read().strip()
+        except FileNotFoundError as e:
             self.logger.error(f"Error loading system prompt: {e}")
             # Fallback system prompt
             return "You are a content extraction specialist. Extract relevant information from HTML content."
