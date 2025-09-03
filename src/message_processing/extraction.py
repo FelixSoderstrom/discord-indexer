@@ -8,6 +8,8 @@ import logging
 from typing import Dict, Any, List, Optional
 import re
 
+from src.message_processing.scraper import get_content
+
 
 logger = logging.getLogger(__name__)
 
@@ -52,26 +54,21 @@ def analyze_link_content(url: str) -> Optional[Dict[str, Any]]:
         url: URL to analyze and extract metadata from
         
     Returns:
-        Dictionary containing link metadata, None if analysis fails
+        None until LinkAnalyzer agent is integrated
     """
-    logger.info("analyze_link_content - not implemented")
+    logger.info(f"Scraping content from URL: {url}")
     
-    # =============================================================================
-    # SCRAPER INTEGRATION POINT - This is where the scraper is expected to go
-    # =============================================================================
-    # Input: url (string)
-    # Scraper Process:
-    #   1. Fetch HTML content from URL
-    #   2. Clean HTML (remove all HTML tags, keep only text content)
-    #   3. Return cleaned_html_content (string)
-    #
-    # Example integration:
-    # cleaned_html_content: str = scraper_class.scrape_page(url)
-    
+    try:
+        content = get_content(url)
+        logger.info(f"Successfully scraped content from {url} ({len(content)} characters)")
+    except Exception as e:
+        logger.warning("Failed scraping content from URL: {url}")
+        return None
+
     # =============================================================================
     # LINK ANALYZER INTEGRATION POINT - This is where the cleaned HTML is expected to be accessible
     # =============================================================================
-    # Input: cleaned_html_content (string from scraper)
+    # Input: cleaned_html_content (string from scraper) - NOW AVAILABLE
     # LinkAnalyzer Process:
     #   1. Take cleaned HTML content (no HTML tags)
     #   2. Extract relevant content using LLM agent
@@ -95,12 +92,9 @@ def analyze_link_content(url: str) -> Optional[Dict[str, Any]]:
     # Key points: [3-5 brief bullet points]
     # Entities: [Important names/terms]
     
-    # TODO: Replace this placeholder with actual scraper + LinkAnalyzer integration
-    return {
-        'url': url,
-        'description': 'Summary of the content',
-        'content_type': 'Article/Video/Image/etc..',
-    }
+    # TODO: Integrate LinkAnalyzer agent to process cleaned_html_content
+    # For now, return None until agent integration is complete
+        
 
 
 def process_message_extractions(message_data: Dict[str, Any]) -> Dict[str, Any]:
