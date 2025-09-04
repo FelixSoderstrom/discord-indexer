@@ -144,47 +144,43 @@ class DMAssistant:
         Returns:
             Generated response text, truncated for Discord if needed
         """
-        try:
-            # Build full conversation with context
-            full_conversation = self._build_full_conversation(user_id, message)
-            
-            # Generate response using chat completion API
-            llm_response = await generate_completion_with_messages_async(
-                messages=full_conversation,
-                model_name=self.model_name,
-                temperature=self.temperature,
-                max_tokens=500
+        # Build full conversation with context
+        full_conversation = self._build_full_conversation(user_id, message)
+        
+        # Generate response using chat completion API
+        llm_response = await generate_completion_with_messages_async(
+            messages=full_conversation,
+            model_name=self.model_name,
+            temperature=self.temperature,
+            max_tokens=500
+        )
+        
+        if not llm_response.success:
+            self.logger.error(f"LLM generation failed: {llm_response.error}")
+            return "Sorry, I'm having trouble processing your message right now. Please try again later."
+        
+        response_content = llm_response.content
+        
+        # Truncate if too long for Discord
+        if len(response_content) > self.max_response_length:
+            response_content = (
+                response_content[:self.max_response_length - 50] 
+                + "\n\n*[Response truncated]*"
             )
+        
+        # Add both messages to conversation history
+        self._add_message_to_conversation(user_id, "user", message)
+        self._add_message_to_conversation(user_id, "assistant", response_content)
+        
+        # Log the interaction
+        user_display = user_name or user_id
+        self.logger.info(
+            f"DM response generated for {user_display} "
+            f"({llm_response.tokens_used} tokens, {llm_response.response_time:.2f}s)"
+        )
+        
+        return response_content
             
-            if not llm_response.success:
-                self.logger.error(f"LLM generation failed: {llm_response.error}")
-                return "Sorry, I'm having trouble processing your message right now. Please try again later."
-            
-            response_content = llm_response.content
-            
-            # Truncate if too long for Discord
-            if len(response_content) > self.max_response_length:
-                response_content = (
-                    response_content[:self.max_response_length - 50] 
-                    + "\n\n*[Response truncated]*"
-                )
-            
-            # Add both messages to conversation history
-            self._add_message_to_conversation(user_id, "user", message)
-            self._add_message_to_conversation(user_id, "assistant", response_content)
-            
-            # Log the interaction
-            user_display = user_name or user_id
-            self.logger.info(
-                f"DM response generated for {user_display} "
-                f"({llm_response.tokens_used} tokens, {llm_response.response_time:.2f}s)"
-            )
-            
-            return response_content
-            
-        except Exception as e:
-            self.logger.error(f"Error generating DM response: {e}")
-            return "Sorry, I encountered an error while processing your message."
     
     def health_check(self) -> bool:
         """Check if the assistant is healthy and ready"""

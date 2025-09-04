@@ -74,6 +74,7 @@ def generate_completion_sync(
                 "top_p": 0.9,
                 "repeat_penalty": 1.1,
             },
+            keep_alive="30m",
         )
         
         response_time = (datetime.now() - start_time).total_seconds()
@@ -142,6 +143,7 @@ def generate_completion_with_messages_sync(
                 "top_p": 0.9,
                 "repeat_penalty": 1.1,
             },
+            keep_alive="30m",
         )
         
         response_time = (datetime.now() - start_time).total_seconds()

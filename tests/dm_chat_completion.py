@@ -12,7 +12,7 @@ from llm.agents.dm_assistant import DMAssistant
 
 async def test_dm_chat():
     # Mock message
-    mock_message = "Hello! How are you doing today?"
+    mock_message = "I want to conquer the world, any suggestions?"
     mock_user_id = "test_user_123"
     mock_user_name = "TestUser"
     

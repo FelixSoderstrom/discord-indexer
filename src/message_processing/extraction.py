@@ -68,13 +68,9 @@ async def analyze_link_content(url: str) -> Optional[str]:
         logger.warning(f"Failed to scrape content from {url}: {e}")
         raise MessageProcessingError(f"Failed to scrape URL {url}: {e}")
     
-    try:
-        summary = await link_analyzer.extract_relevant_content(content)
-        logger.info(f"Successfully extracted summary from {url} ({len(summary)} characters)")
-        return summary
-    except Exception as e:
-        logger.error(f"Failed to extract content from {url}: {e}")
-        raise MessageProcessingError(f"Failed to analyze URL {url}: {e}")
+    summary = await link_analyzer.extract_relevant_content(content)
+    logger.info(f"Successfully extracted summary from {url} ({len(summary)} characters)")
+    return summary
         
 
 

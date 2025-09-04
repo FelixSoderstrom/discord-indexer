@@ -117,6 +117,12 @@ def get_model_max_context(model_name: str) -> int:
         logger.debug(f"Using cached context window for {model_name}: {_model_context_cache[model_name]}")
         return _model_context_cache[model_name]
     
+    # Special case for mistral-nemo due to incorrect model metadata
+    if "mistral-nemo" in model_name.lower():
+        logger.info(f"Using corrected context window for {model_name}: 100000 tokens")
+        _model_context_cache[model_name] = 100000
+        return 100000
+    
     try:
         # Use ollama show command to get detailed model information
         result = subprocess.run(
@@ -153,3 +159,32 @@ def get_model_max_context(model_name: str) -> int:
         # Cache default and return
         _model_context_cache[model_name] = 2048
         return 2048
+
+
+def unload_model_from_memory(model_name: str) -> bool:
+    """
+    Instantly unload a model from ollama memory
+    
+    Args:
+        model_name: Name of the model to unload from memory
+        
+    Returns:
+        True if unload request was successful, False otherwise
+    """
+    try:
+        client = get_ollama_client()
+        
+        # Send a minimal request with keep_alive=0 to unload the model
+        client.chat(
+            model=model_name,
+            messages=[{"role": "user", "content": "unload"}],
+            options={"num_predict": 1},
+            keep_alive=0,
+        )
+        
+        logger.info(f"Successfully unloaded model {model_name} from memory")
+        return True
+        
+    except (ConnectionError, TimeoutError, OSError, ValueError, KeyError, RuntimeError) as e:
+        logger.error(f"Error unloading model {model_name}: {e}")
+        return False
