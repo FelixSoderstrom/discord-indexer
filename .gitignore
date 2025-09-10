@@ -7,3 +7,7 @@ __pycache__/
 /.cursor/
 chroma_data/
 _ignore/
+.claude/
+CLAUDE.md
+_tickets/
+databases/
