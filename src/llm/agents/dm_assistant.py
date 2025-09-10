@@ -1,11 +1,12 @@
 import logging
 import os
+import re
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 
-from ..chat_completion import generate_completion_with_messages_async, LLMResponse
-from ..utils import ensure_model_available, health_check
+from ..utils import ensure_model_available, health_check, get_ollama_client
+from .tools.search_tool import create_search_tool
 
 try:
     from ...config.settings import settings
@@ -132,54 +133,148 @@ class DMAssistant:
         """Get number of messages in conversation"""
         return len(self._get_conversation_messages(user_id))
     
-    async def respond_to_dm(self, message: str, user_id: str, user_name: str = None) -> str:
+    async def respond_to_dm(self, message: str, user_id: str, user_name: str = None, server_id: str = None) -> str:
         """
-        Generate response to a Discord DM
+        Generate response to a Discord DM using Ollama native tool calling
         
         Args:
             message: User's message content
             user_id: Discord user ID (for conversation tracking)
             user_name: Optional user name for logging
+            server_id: Discord server ID for tool context (REQUIRED)
             
         Returns:
             Generated response text, truncated for Discord if needed
         """
+        if not server_id:
+            return "❌ **Configuration Error**: No server specified for search. Please end conversation and start again with `!ask`."
         # Build full conversation with context
         full_conversation = self._build_full_conversation(user_id, message)
         
-        # Generate response using chat completion API
-        llm_response = await generate_completion_with_messages_async(
-            messages=full_conversation,
-            model_name=self.model_name,
-            temperature=self.temperature,
-            max_tokens=500
-        )
+        # Define tool schema for Ollama native tool calling
+        tools = [{
+            'type': 'function',
+            'function': {
+                'name': 'search_messages',
+                'description': 'Search Discord message history for relevant content. Use this when users ask about past conversations, specific topics, or what someone said about something.',
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'query': {
+                            'type': 'string',
+                            'description': 'Search query to find relevant messages (e.g., "Carl XVI Gustaf", "project deadline", "standup meeting")',
+                        },
+                        'limit': {
+                            'type': 'integer',
+                            'description': 'Maximum number of results to return (default: 5)',
+                            'default': 5
+                        }
+                    },
+                    'required': ['query'],
+                },
+            },
+        }]
         
-        if not llm_response.success:
-            self.logger.error(f"LLM generation failed: {llm_response.error}")
-            return "Sorry, I'm having trouble processing your message right now. Please try again later."
-        
-        response_content = llm_response.content
-        
-        # Truncate if too long for Discord
-        if len(response_content) > self.max_response_length:
-            response_content = (
-                response_content[:self.max_response_length - 50] 
-                + "\n\n*[Response truncated]*"
+        try:
+            # Get Ollama client and make tool-aware chat request
+            client = get_ollama_client()
+            
+            response = client.chat(
+                model=self.model_name,
+                messages=full_conversation,
+                tools=tools,
+                options={
+                    'temperature': self.temperature,
+                    'num_predict': 500
+                }
             )
+            
+            # Handle tool calls if present
+            if 'tool_calls' in response['message']:
+                response_content = await self._handle_native_tool_calls(
+                    response['message'], server_id, full_conversation, tools
+                )
+            else:
+                response_content = response['message']['content']
+            
+            # Truncate if too long for Discord
+            if len(response_content) > self.max_response_length:
+                response_content = (
+                    response_content[:self.max_response_length - 50] 
+                    + "\n\n*[Response truncated]*"
+                )
+            
+            # Add both messages to conversation history
+            self._add_message_to_conversation(user_id, "user", message)
+            self._add_message_to_conversation(user_id, "assistant", response_content)
+            
+            # Log the interaction
+            user_display = user_name or user_id
+            self.logger.info(f"DM response generated for {user_display}")
+            
+            return response_content
+            
+        except Exception as e:
+            self.logger.error(f"Error in DM response generation: {e}")
+            return "Sorry, I'm having trouble processing your message right now. Please try again later."
+    
+    async def _handle_native_tool_calls(self, message_with_tools, server_id: str, conversation: List[Dict], tools: List[Dict]) -> str:
+        """Handle native Ollama tool calls.
         
-        # Add both messages to conversation history
-        self._add_message_to_conversation(user_id, "user", message)
-        self._add_message_to_conversation(user_id, "assistant", response_content)
-        
-        # Log the interaction
-        user_display = user_name or user_id
-        self.logger.info(
-            f"DM response generated for {user_display} "
-            f"({llm_response.tokens_used} tokens, {llm_response.response_time:.2f}s)"
-        )
-        
-        return response_content
+        Args:
+            message_with_tools: Message containing tool calls from Ollama
+            server_id: Discord server ID for tool context  
+            conversation: Full conversation context
+            tools: Tool definitions
+            
+        Returns:
+            Final response after tool execution
+        """
+        try:
+            # Add the assistant message with tool calls to conversation
+            conversation.append(message_with_tools)
+            
+            # Execute each tool call
+            for tool_call in message_with_tools['tool_calls']:
+                function_name = tool_call['function']['name']
+                function_args = tool_call['function']['arguments']
+                
+                if function_name == 'search_messages':
+                    # Execute search tool
+                    query = function_args['query']
+                    limit = function_args.get('limit', 5)
+                    
+                    self.logger.info(f"Executing search_messages: {query}")
+                    
+                    # Create search tool and execute
+                    search_tool = create_search_tool(server_id)
+                    search_results = search_tool.search_messages(query, limit)
+                    formatted_results = search_tool.format_search_results(search_results)
+                    
+                    # Add tool result to conversation
+                    conversation.append({
+                        'role': 'tool',
+                        'content': formatted_results,
+                        'tool_call_id': tool_call.get('id', 'search_1')
+                    })
+            
+            # Get final response with tool results
+            client = get_ollama_client()
+            final_response = client.chat(
+                model=self.model_name,
+                messages=conversation,
+                tools=tools,
+                options={
+                    'temperature': self.temperature,
+                    'num_predict': 500
+                }
+            )
+            
+            return final_response['message']['content']
+            
+        except Exception as e:
+            self.logger.error(f"Error handling native tool calls: {e}")
+            return "I tried to search the message history but encountered an error. Please try rephrasing your question."
             
     
     def health_check(self) -> bool:

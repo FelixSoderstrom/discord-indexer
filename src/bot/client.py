@@ -8,6 +8,7 @@ from .rate_limiter import DiscordRateLimiter
 
 if TYPE_CHECKING:
     from ..message_processing import MessagePipeline
+    from ..llm.agents.dm_assistant import DMAssistant
 
 
 class DiscordBot(commands.Bot):
@@ -30,6 +31,10 @@ class DiscordBot(commands.Bot):
         self.message_pipeline: Optional["MessagePipeline"] = None
         self.batch_size = 1000
         
+        # DMAssistant for conversation handling
+        self.dm_assistant: Optional["DMAssistant"] = None
+        self.queue_worker = None
+        
         # Legacy storage (will be removed when pipeline fully implemented)
         self.stored_messages: List[Dict[str, Any]] = []
         self.processed_channels: List[int] = []
@@ -44,6 +49,23 @@ class DiscordBot(commands.Bot):
         if self.message_pipeline:
             self.message_pipeline = None
             self.logger.info("Message pipeline cleared")
+            
+        # Clear session manager
+        if hasattr(self, 'session_manager') and self.session_manager:
+            await self.session_manager.stop_cleanup_task()
+            self.session_manager = None
+            self.logger.info("Session manager stopped")
+        
+        # Clear queue worker
+        if hasattr(self, 'queue_worker') and self.queue_worker:
+            await self.queue_worker.stop()
+            self.queue_worker = None
+            self.logger.info("Queue worker stopped")
+            
+        # Clear DMAssistant reference
+        if hasattr(self, 'dm_assistant') and self.dm_assistant:
+            self.dm_assistant = None
+            self.logger.info("DMAssistant cleared")
 
         await super().close()
 
