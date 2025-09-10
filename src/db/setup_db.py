@@ -1,8 +1,9 @@
-"""Database connection and client management for ChromaDB.
+"""Database connection and client management for ChromaDB and conversation storage.
 
 This module handles ChromaDB client initialization and provides centralized
 access to server-specific database clients throughout the application. Each
 server gets its own database with lazy loading for memory efficiency.
+Also manages SQLite conversation database initialization.
 """
 
 import logging
@@ -20,10 +21,11 @@ _clients: Dict[int, Client] = {}
 
 
 def initialize_db() -> None:
-    """Initialize the database directory structure.
+    """Initialize the database directory structure and conversation database.
 
     Creates the base databases directory structure for server-specific databases.
     Individual server databases are created lazily when first accessed.
+    Also initializes the SQLite conversation database for DMAssistant.
 
     Raises:
         OSError: If database directory cannot be created or accessed
@@ -35,6 +37,12 @@ def initialize_db() -> None:
     try:
         databases_path.mkdir(exist_ok=True)
         logger.info(f"Database directory structure ready: {databases_path}")
+        
+        # Initialize conversation database
+        from .conversation_db import initialize_conversation_db
+        initialize_conversation_db()
+        logger.info("Conversation database initialized successfully")
+        
     except PermissionError as e:
         logger.error(f"Insufficient permissions for database directory: {e}")
         raise
