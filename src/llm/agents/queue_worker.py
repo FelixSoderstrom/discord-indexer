@@ -8,12 +8,12 @@ import asyncio
 import logging
 from typing import Optional
 
-from .conversation_queue import get_conversation_queue, ConversationRequest
-from .dm_assistant import DMAssistant
-from .langchain_dm_assistant import LangChainDMAssistant
+from src.llm.agents.conversation_queue import get_conversation_queue, ConversationRequest
+from src.llm.agents.dm_assistant import DMAssistant
+from src.llm.agents.langchain_dm_assistant import LangChainDMAssistant
 
 try:
-    from ...config.settings import settings
+    from src.config.settings import settings
 except ImportError:
     import sys
     import os

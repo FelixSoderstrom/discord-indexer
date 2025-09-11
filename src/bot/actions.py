@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from typing import List, Optional
 from datetime import datetime
 from dataclasses import dataclass
-from ..message_processing import MessagePipeline
+from src.message_processing import MessagePipeline
 
 
 @dataclass
@@ -19,7 +19,7 @@ class ServerOption:
     message_count: int = 0
 
 if TYPE_CHECKING:
-    from .client import DiscordBot
+    from src.bot.client import DiscordBot
 
 
 async def on_ready_handler(bot: "DiscordBot") -> None:
@@ -41,7 +41,7 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
     # Initialize LangChain DMAssistant for conversation handling
     logger.info("🤖 Initializing LangChain DMAssistant...")
     try:
-        from ..llm.agents.langchain_dm_assistant import LangChainDMAssistant
+        from src.llm.agents.langchain_dm_assistant import LangChainDMAssistant
         bot.dm_assistant = LangChainDMAssistant()
         
         # Verify model is available and healthy
@@ -56,7 +56,7 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
         
         # Initialize queue worker with LangChain
         logger.info("⚡ Starting LangChain conversation queue worker...")
-        from ..llm.agents.queue_worker import initialize_queue_worker
+        from src.llm.agents.queue_worker import initialize_queue_worker
         queue_worker = initialize_queue_worker(use_langchain=True)
         await queue_worker.start()
         bot.queue_worker = queue_worker  # Store reference for cleanup
@@ -213,7 +213,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         Returns:
             List of ServerOption objects with indexing information
         """
-        from ..db.setup_db import get_db
+        from src.db.setup_db import get_db
         import os
         from datetime import datetime
         
@@ -285,7 +285,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
             return
         
         # Import systems
-        from ..llm.agents.conversation_queue import get_conversation_queue
+        from src.llm.agents.conversation_queue import get_conversation_queue
         import re
         
         queue = get_conversation_queue()
@@ -383,7 +383,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
             await ctx.send("🔒 **DM Only**: This command only works in direct messages.")
             return
         
-        from ..db.conversation_db import get_conversation_db
+        from src.db.conversation_db import get_conversation_db
         
         conv_db = get_conversation_db()
         user_id = str(ctx.author.id)
@@ -450,7 +450,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         pipeline_status = "✅ Active" if bot.message_pipeline else "❌ Inactive"
         
         # Get queue statistics (session manager removed in Phase 1)
-        from ..llm.agents.conversation_queue import get_conversation_queue
+        from src.llm.agents.conversation_queue import get_conversation_queue
         
         queue = get_conversation_queue()
         queue_stats = queue.get_stats()

@@ -10,10 +10,10 @@ import logging
 from typing import Dict, Any, Optional, List
 from collections import defaultdict
 
-from .embedding import process_message_embeddings
-from .extraction import process_message_extractions
-from .metadata import process_message_metadata
-from .storage import store_complete_message
+from src.message_processing.embedding import process_message_embeddings
+from src.message_processing.extraction import process_message_extractions
+from src.message_processing.metadata import process_message_metadata
+from src.message_processing.storage import store_complete_message
 from src.exceptions.message_processing import MessageProcessingError
 
 

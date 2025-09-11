@@ -5,11 +5,11 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 
-from ..utils import ensure_model_available, health_check, get_ollama_client
-from .tools.search_tool import create_search_tool
+from src.llm.utils import ensure_model_available, health_check, get_ollama_client
+from src.llm.agents.tools.search_tool import create_search_tool
 
 try:
-    from ...config.settings import settings
+    from src.config.settings import settings
 except ImportError:
     # Fallback for direct script execution
     import sys

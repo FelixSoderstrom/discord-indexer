@@ -8,7 +8,7 @@ import logging
 from typing import List, Dict, Any
 from langchain_core.tools import tool
 
-from .search_tool import create_search_tool
+from src.llm.agents.tools.search_tool import create_search_tool
 
 
 logger = logging.getLogger(__name__)

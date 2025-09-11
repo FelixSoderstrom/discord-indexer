@@ -119,7 +119,7 @@ def get_server_indexing_status(server_id: int) -> Dict[str, Any]:
     """
     try:
         # Import here to avoid circular imports
-        from .resumption import get_resumption_info
+        from src.message_processing.resumption import get_resumption_info
         
         logger.debug(f"Getting indexing status for server {server_id}")
         resumption_info = get_resumption_info(server_id)

@@ -5,7 +5,7 @@ Discord messages through various stages including embedding, extraction,
 metadata preparation, and storage.
 """
 
-from .processor import MessagePipeline
+from src.message_processing.processor import MessagePipeline
 
 __all__ = ['MessagePipeline']
 

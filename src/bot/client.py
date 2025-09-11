@@ -4,11 +4,12 @@ from discord.ext import commands
 from src.config.settings import settings
 import logging
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
-from .rate_limiter import DiscordRateLimiter
+from src.bot.rate_limiter import DiscordRateLimiter
+from src.message_processing.storage import get_server_indexing_status
 
 if TYPE_CHECKING:
-    from ..message_processing import MessagePipeline
-    from ..llm.agents.dm_assistant import DMAssistant
+    from src.message_processing import MessagePipeline
+    from src.llm.agents.dm_assistant import DMAssistant
 
 
 class DiscordBot(commands.Bot):
@@ -228,7 +229,6 @@ class DiscordBot(commands.Bot):
                 self.logger.info(f"Checking resumption status for server {guild_id}")
                 
                 # Get resumption info for this server
-                from ..message_processing.storage import get_server_indexing_status
                 server_status = get_server_indexing_status(guild_id)
                 
                 self.logger.info(f"Server {guild_id} status: {server_status['status']}, "

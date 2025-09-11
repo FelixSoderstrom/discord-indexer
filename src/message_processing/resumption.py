@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import Optional, NamedTuple
 from pathlib import Path
-from ..db import get_db
+from src.db import get_db
 from chromadb.errors import ChromaError
 
 logger = logging.getLogger(__name__)

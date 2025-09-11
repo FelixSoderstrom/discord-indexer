@@ -12,6 +12,7 @@ from typing import Optional, Dict
 import chromadb
 from chromadb import Client
 from chromadb.errors import ChromaError
+from src.db.conversation_db import initialize_conversation_db
 
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,6 @@ def initialize_db() -> None:
         logger.info(f"Database directory structure ready: {databases_path}")
         
         # Initialize conversation database
-        from .conversation_db import initialize_conversation_db
         initialize_conversation_db()
         logger.info("Conversation database initialized successfully")
         

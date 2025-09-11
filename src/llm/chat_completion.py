@@ -5,10 +5,10 @@ from typing import Dict, Any, List
 from dataclasses import dataclass
 from datetime import datetime
 
-from .utils import get_ollama_client, get_model_max_context
+from src.llm.utils import get_ollama_client, get_model_max_context
 
 try:
-    from ..config.settings import settings
+    from src.config.settings import settings
 except ImportError:
     # Fallback for direct script execution
     import sys

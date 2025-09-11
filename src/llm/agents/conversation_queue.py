@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 try:
-    from ..db.conversation_db import get_conversation_db
+    from src.db.conversation_db import get_conversation_db
 except ImportError:
     # Fallback for testing
     from src.db.conversation_db import get_conversation_db

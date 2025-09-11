@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 try:
-    from ...db.setup_db import get_db
+    from src.db.setup_db import get_db
 except ImportError:
     # Fallback for testing
     from src.db.setup_db import get_db

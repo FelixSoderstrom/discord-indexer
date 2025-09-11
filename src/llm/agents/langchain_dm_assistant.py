@@ -12,7 +12,7 @@ from datetime import datetime
 
 # Enable LangChain debugging when configured
 try:
-    from ...config.settings import settings
+    from src.config.settings import settings
     if settings.LANGCHAIN_VERBOSE:
         import langchain
         langchain.debug = True
@@ -26,11 +26,11 @@ from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-from .tools.langchain_search_tool import create_server_specific_search_tool
-from .tools.conversation_search_tool import create_conversation_search_tool
+from src.llm.agents.tools.langchain_search_tool import create_server_specific_search_tool
+from src.llm.agents.tools.conversation_search_tool import create_conversation_search_tool
 
 try:
-    from ...config.settings import settings
+    from src.config.settings import settings
 except ImportError:
     import sys
     import os
