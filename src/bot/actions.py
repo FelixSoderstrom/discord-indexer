@@ -3,9 +3,20 @@ from discord.ext import commands
 import logging
 import sys
 from typing import TYPE_CHECKING
-from typing import List
-from ..llm.agents.session_manager import ServerOption
+from typing import List, Optional
+from datetime import datetime
+from dataclasses import dataclass
 from ..message_processing import MessagePipeline
+
+
+@dataclass
+class ServerOption:
+    """Available server option for user selection."""
+    
+    server_id: str
+    server_name: str
+    last_indexed: Optional[datetime] = None
+    message_count: int = 0
 
 if TYPE_CHECKING:
     from .client import DiscordBot
@@ -40,13 +51,8 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
             logger.error("❌ LangChain DMAssistant model health check failed")
             raise RuntimeError("LangChain DMAssistant model not available")
         
-        # Initialize session manager
-        logger.info("🕒 Starting session manager...")
-        from ..llm.agents.session_manager import initialize_session_manager
-        session_manager = initialize_session_manager(timeout_minutes=5)
-        await session_manager.start_cleanup_task()
-        bot.session_manager = session_manager  # Store reference for cleanup
-        logger.info("✅ Session manager started successfully")
+        # Session manager removed in Phase 1 - now using stateless queue-based processing
+        logger.info("✅ Using stateless queue-based processing (no session manager needed)")
         
         # Initialize queue worker with LangChain
         logger.info("⚡ Starting LangChain conversation queue worker...")
@@ -82,8 +88,8 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
 async def handle_dm_message(bot: "DiscordBot", message: discord.Message) -> None:
     """Handle direct messages to the bot that are not commands.
     
-    If user has active session, message is sent to DMAssistant via queue.
-    Otherwise, provides helpful guidance about available commands.
+    Provides helpful guidance about available commands since we now use
+    stateless queue-based processing instead of persistent sessions.
     
     Args:
         bot: DiscordBot instance
@@ -94,60 +100,15 @@ async def handle_dm_message(bot: "DiscordBot", message: discord.Message) -> None
     content_preview = message.content[:30] + "..." if len(message.content) > 30 else message.content
     logger.info(f"💬 Received non-command DM from {message.author.name}: {content_preview}")
     
-    # Check if user has an active session
-    from ..llm.agents.session_manager import get_session_manager
-    from ..llm.agents.conversation_queue import get_conversation_queue
-    
-    session_manager = get_session_manager()
-    queue = get_conversation_queue()
-    user_id = str(message.author.id)
-    
-    # Check if user is waiting for server selection
-    if session_manager.has_pending_server_selection(user_id):
-        await _handle_server_selection_response(bot, message, session_manager, queue)
-        return
-    
-    # If user has active session, process message via DMAssistant
-    if session_manager.has_active_session(user_id):
-        # Update session activity
-        session_manager.update_session_activity(user_id)
-        
-        # Check if user already has a request queued
-        if queue.is_user_queued(user_id):
-            await message.channel.send("⏳ **Processing**: Please wait, I'm still working on your previous message.")
-            return
-        
-        # Get server ID from active session
-        session = session_manager.get_session(user_id)
-        server_id = session.server_id if session else None
-        
-        if not server_id:
-            await message.channel.send("❌ **Session Error**: Could not determine which server to search. Please use `!end` and start over with `!ask`.")
-            return
-        
-        # Add message to queue for DMAssistant processing
-        success = await queue.add_request(
-            user_id=user_id,
-            server_id=server_id,
-            message=message.content,
-            discord_message_id=message.id,
-            discord_channel=message.channel
-        )
-        
-        if success:
-            await message.channel.send("🤖 **Processing**: I'm thinking about your message...")
-        else:
-            await message.channel.send("❌ **Queue Full**: I'm too busy right now. Please try again in a moment.")
-        
-        return
-    
-    # If no active session, provide helpful guidance
+    # Provide helpful guidance for stateless interaction model
     await message.channel.send(
         "👋 Hello! I'm the Discord Indexer Bot.\n\n"
-        "To start a conversation with me, use:\n"
-        "• `!ask <your question>` - Start AI conversation\n"
+        "To ask me a question, use:\n"
+        "• `!ask <your question>` - Ask me anything about your servers\n"
         "• `!help` - Show all available commands\n"
         "• `!status` - Show bot status\n\n"
+        "Each `!ask` command is processed independently in a fair queue.\n"
+        "Your conversation history is preserved in the database for context.\n\n"
         "Note: Only server messages are indexed. DMs are private and never stored."
     )
 
@@ -308,84 +269,12 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         
         return mutual_servers
     
-    async def _handle_server_selection_response(bot: "DiscordBot", message: discord.Message, session_manager, queue) -> None:
-        """Handle user's server selection response.
-        
-        Args:
-            bot: DiscordBot instance
-            message: Discord message with server selection
-            session_manager: SessionManager instance
-            queue: ConversationQueue instance
-        """
-        user_id = str(message.author.id)
-        selection_data = session_manager.get_pending_server_selection(user_id)
-        
-        if not selection_data:
-            await message.channel.send("❌ **Selection Expired**: Your server selection has expired. Use `!ask` to start over.")
-            return
-        
-        user_choice = message.content.strip()
-        selected_server = None
-        
-        # Try to match by number first
-        try:
-            choice_num = int(user_choice)
-            if 1 <= choice_num <= len(selection_data.available_servers):
-                selected_server = selection_data.available_servers[choice_num - 1]
-        except ValueError:
-            # Not a number, try to match by server name
-            for server in selection_data.available_servers:
-                if user_choice.lower() == server.server_name.lower():
-                    selected_server = server
-                    break
-        
-        if not selected_server:
-            # Invalid selection
-            valid_options = []
-            for i, server in enumerate(selection_data.available_servers, 1):
-                valid_options.append(f"**{i}** or **{server.server_name}**")
-            
-            await message.channel.send(
-                f"❓ **Invalid Selection**: '{user_choice}' is not a valid option.\n\n"
-                f"Please choose: {', '.join(valid_options)}"
-            )
-            return
-        
-        # Valid server selected - remove from pending and create session
-        session_manager.complete_server_selection(user_id)
-        session_manager.create_session(user_id, selected_server.server_id, message.channel)
-        
-        # Add original question to queue
-        success = await queue.add_request(
-            user_id=user_id,
-            server_id=selected_server.server_id,
-            message=selection_data.original_question,
-            discord_message_id=message.id,
-            discord_channel=message.channel
-        )
-        
-        if success:
-            position = queue.get_queue_position(user_id)
-            server_name = selected_server.server_name
-            
-            if position == 1:
-                status_msg = await message.channel.send(f"✅ **Server Selected**: **{server_name}** - processing your question now...")
-            else:
-                status_msg = await message.channel.send(f"✅ **Server Selected**: **{server_name}** - position {position} in queue")
-            
-            # Store status message ID for updates
-            if user_id in queue._active_requests:
-                queue._active_requests[user_id].status_message_id = status_msg.id
-        else:
-            await message.channel.send(
-                f"✅ **Server Selected**: **{selected_server.server_name}**\n"
-                f"❌ **Queue Full**: Too many requests right now. Please try again in a few minutes."
-            )
+    # _handle_server_selection_response removed in Phase 1 - now using direct server selection in !ask command
     
     # ===== COMMAND HANDLERS =====
     @bot.command(name='ask')
     async def ask_command(ctx: commands.Context, *, message: str = None) -> None:
-        """Start a conversation with the DMAssistant."""
+        """Ask the DMAssistant a question (stateless queue-based processing)."""
         if not message:
             await ctx.send("❓ **Usage**: `!ask <your question>`\nExample: `!ask What did PM say about the standup?`")
             return
@@ -397,21 +286,27 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         
         # Import systems
         from ..llm.agents.conversation_queue import get_conversation_queue
-        from ..llm.agents.session_manager import get_session_manager, ServerOption
+        import re
         
         queue = get_conversation_queue()
-        session_manager = get_session_manager()
         user_id = str(ctx.author.id)
         
         # Check if user already has a request queued
         if queue.is_user_queued(user_id):
-            await ctx.send("⏳ **Already Processing**: You already have a conversation request in progress. Please wait for it to complete or use `!end` to cancel.")
+            await ctx.send("⏳ **Already Processing**: You already have a request in the queue. Please wait for it to complete.")
             return
         
-        # Check if user is already waiting for server selection
-        if session_manager.has_pending_server_selection(user_id):
-            await ctx.send("⏳ **Server Selection Pending**: You're already choosing a server. Please complete your selection or wait for timeout.")
-            return
+        # Parse server selection from message if present [server] format
+        server_selection = None
+        actual_message = message
+        server_match = re.match(r'^\[([^\]]+)\]\s*(.*)', message)
+        if server_match:
+            server_selection = server_match.group(1).strip()
+            actual_message = server_match.group(2).strip()
+            
+            if not actual_message:
+                await ctx.send("❓ **Missing Question**: Please include your question after the server selection.\nExample: `!ask [ServerName] What did PM say?`")
+                return
         
         # Find mutual servers
         mutual_servers = await _get_mutual_servers_with_data(bot, ctx.author.id)
@@ -420,15 +315,33 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
             await ctx.send("❌ **No Indexed Servers**: We don't share any servers with indexed messages. I need to be in servers with you to search their message history.")
             return
         
-        # If only one server, go directly to queue
-        if len(mutual_servers) == 1:
-            server = mutual_servers[0]
-            session_manager.create_session(user_id, server.server_id, ctx.channel)
+        # If server specified, find and use it
+        selected_server = None
+        if server_selection:
+            # Try to find by number first
+            try:
+                server_num = int(server_selection)
+                if 1 <= server_num <= len(mutual_servers):
+                    selected_server = mutual_servers[server_num - 1]
+            except ValueError:
+                # Try to find by name
+                for server in mutual_servers:
+                    if server.server_name.lower() == server_selection.lower():
+                        selected_server = server
+                        break
+            
+            if not selected_server:
+                await ctx.send(f"❌ **Invalid Server**: '{server_selection}' not found. Use `!ask` without server selection to see available options.")
+                return
+        
+        # If only one server or server specified, go directly to queue
+        if len(mutual_servers) == 1 or selected_server:
+            server = selected_server or mutual_servers[0]
             
             success = await queue.add_request(
                 user_id=user_id,
                 server_id=server.server_id,
-                message=message,
+                message=actual_message,
                 discord_message_id=ctx.message.id,
                 discord_channel=ctx.channel
             )
@@ -448,15 +361,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
                 await ctx.send("❌ **Queue Full**: Too many requests right now. Please try again in a few minutes.")
             return
         
-        # Multiple servers - ask user to choose
-        session_manager.add_pending_server_selection(
-            user_id=user_id,
-            question=message,
-            servers=mutual_servers,
-            discord_channel=ctx.channel
-        )
-        
-        # Send server selection message
+        # Multiple servers - send selection message with instructions
         selection_text = "🔍 **Server Selection**: I found your question, but we're in multiple servers. Which server should I search?\n\n"
         
         for i, server in enumerate(mutual_servers, 1):
@@ -464,34 +369,11 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
             selection_text += f"**{i}. {server.server_name}**\n"
             selection_text += f"   📊 {server.message_count:,} messages | 📅 Last indexed: {last_indexed}\n\n"
         
-        selection_text += "Reply with the **server name** or **number** (e.g., '1' or 'ProjectTeam').\n"
-        selection_text += "⏰ You have 5 minutes to respond."
+        selection_text += "**To proceed**, use `!ask` again but specify the server:\n"
+        selection_text += f"Example: `!ask [{mutual_servers[0].server_name}] {actual_message}`\n\n"
+        selection_text += "Or use server number: `!ask [1] {actual_message}`"
         
         await ctx.send(selection_text)
-    
-    @bot.command(name='end')
-    async def end_command(ctx: commands.Context) -> None:
-        """End active conversation with DMAssistant."""
-        # Only work in DMs
-        if not isinstance(ctx.channel, discord.DMChannel):
-            await ctx.send("🔒 **DM Only**: The `!end` command only works in direct messages.")
-            return
-        
-        from ..llm.agents.conversation_queue import get_conversation_queue
-        from ..llm.agents.session_manager import get_session_manager
-        
-        queue = get_conversation_queue()
-        session_manager = get_session_manager()
-        user_id = str(ctx.author.id)
-        
-        # End session and check if user had active request
-        session_ended = session_manager.end_session(user_id)
-        queue_cancelled = queue.is_user_queued(user_id)
-        
-        if session_ended or queue_cancelled:
-            await ctx.send("✅ **Session Ended**: Your conversation has been ended.")
-        else:
-            await ctx.send("❓ **No Active Session**: You don't have an active conversation to end.")
     
     @bot.command(name='clear-conversation-history')
     async def clear_history_command(ctx: commands.Context) -> None:
@@ -535,18 +417,18 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         embed.add_field(
             name="🤖 DMAssistant Commands (DM Only)",
             value=(
-                "`!ask <question>` - Start AI conversation session\n"
-                "`!end` - End active conversation session\n"
+                "`!ask <question>` - Ask me anything about your servers\n"
                 "`!clear-conversation-history` - Delete your conversation history"
             ),
             inline=False
         )
         embed.add_field(
-            name="💬 How Conversations Work",
+            name="💬 How Questions Work",
             value=(
-                "• Start with `!ask <question>` in DMs\n"
-                "• Continue chatting naturally (no commands needed)\n"
-                "• Sessions auto-expire after 5 minutes of inactivity\n"
+                "• Each `!ask` command is processed independently\n"
+                "• Fair queue system - everyone gets equal access\n"
+                "• Conversation history preserved for context\n"
+                "• Multiple servers: use `!ask [ServerName] question`\n"
                 "• I can search and reference server message history"
             ),
             inline=False
@@ -567,14 +449,10 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         channel_count = len(bot.get_all_channels())
         pipeline_status = "✅ Active" if bot.message_pipeline else "❌ Inactive"
         
-        # Get session and queue statistics
-        from ..llm.agents.session_manager import get_session_manager
+        # Get queue statistics (session manager removed in Phase 1)
         from ..llm.agents.conversation_queue import get_conversation_queue
         
-        session_manager = get_session_manager()
         queue = get_conversation_queue()
-        
-        session_stats = session_manager.get_session_stats()
         queue_stats = queue.get_stats()
         
         embed = discord.Embed(
@@ -587,10 +465,10 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         embed.add_field(name="Channels", value=str(channel_count), inline=True)
         embed.add_field(name="Pipeline", value=pipeline_status, inline=True)
         
-        # DMAssistant stats
-        embed.add_field(name="Active Sessions", value=str(session_stats["active_sessions"]), inline=True)
+        # DMAssistant stats (stateless queue-based processing)
         embed.add_field(name="Queue Size", value=str(queue_stats["queue_size"]), inline=True)
         embed.add_field(name="Total Processed", value=str(queue_stats["total_processed"]), inline=True)
+        embed.add_field(name="Processing Model", value="Stateless Queue", inline=True)
         
         # Memory stats
         embed.add_field(

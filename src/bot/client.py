@@ -50,11 +50,7 @@ class DiscordBot(commands.Bot):
             self.message_pipeline = None
             self.logger.info("Message pipeline cleared")
             
-        # Clear session manager
-        if hasattr(self, 'session_manager') and self.session_manager:
-            await self.session_manager.stop_cleanup_task()
-            self.session_manager = None
-            self.logger.info("Session manager stopped")
+        # Session manager removed in Phase 1 - now using stateless processing
         
         # Clear queue worker
         if hasattr(self, 'queue_worker') and self.queue_worker:

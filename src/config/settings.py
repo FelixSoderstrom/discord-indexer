@@ -13,6 +13,7 @@ class BotSettings(BaseSettings):
     COMMAND_PREFIX: str = "!"
     DEBUG: bool = False
     LLM_MODEL_NAME: str
+    LANGCHAIN_VERBOSE: bool = False
     
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
     

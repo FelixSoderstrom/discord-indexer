@@ -1,5 +1,12 @@
 """Session manager for DMAssistant conversations.
 
+⚠️  DEPRECATED: This module is no longer used as of Phase 1 implementation.
+    The bot now uses stateless queue-based processing instead of persistent sessions.
+    
+    This file is kept for compatibility but will be removed in a future version.
+    
+    See: Phase 1 implementation for stateless queue-based processing.
+
 Manages active user sessions with timeout handling and cleanup notifications.
 """
 

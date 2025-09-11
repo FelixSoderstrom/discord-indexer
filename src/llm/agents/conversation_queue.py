@@ -182,41 +182,162 @@ class ConversationQueue:
             # User not in queue order (shouldn't happen)
             return None
     
-    async def load_conversation_history(self, user_id: str, server_id: str, limit: int = 20) -> List[Dict[str, str]]:
-        """Load conversation history for request processing.
+    async def load_conversation_history(
+        self, 
+        user_id: str, 
+        server_id: str, 
+        max_messages: int = 100, 
+        max_tokens: int = 4000
+    ) -> List[Dict[str, str]]:
+        """Load conversation history with intelligent context window management.
+        
+        Loads recent conversation history prioritizing newest messages while
+        respecting token limits. Uses approximate token counting for efficiency.
         
         Args:
             user_id: Discord user ID
             server_id: Discord server ID
-            limit: Maximum messages to load
+            max_messages: Maximum number of messages to consider
+            max_tokens: Approximate maximum tokens to include
             
         Returns:
-            List of conversation messages for DMAssistant context
+            List of conversation messages in chronological order for LLM context
         """
-        def _load_history():
-            """Load history in thread pool to avoid blocking."""
+        def _load_and_prioritize_history():
+            """Load and prioritize history with token management."""
             conv_db = get_conversation_db()
-            history = conv_db.get_conversation_history(user_id, server_id, limit=limit)
+            
+            # Get recent messages in reverse chronological order (newest first)
+            all_messages = conv_db.get_conversation_history(user_id, server_id, limit=max_messages)
+            
+            if not all_messages:
+                return []
+            
+            # Reverse to get newest first for token counting
+            recent_messages = list(reversed(all_messages))
+            
+            # Approximate token counting (4 chars ≈ 1 token)
+            selected_messages = []
+            total_tokens = 0
+            
+            for msg in recent_messages:
+                # Estimate tokens: content + role overhead
+                msg_tokens = len(msg["content"]) // 4 + 10  # +10 for role/formatting overhead
+                
+                if total_tokens + msg_tokens > max_tokens and selected_messages:
+                    # Would exceed limit and we have at least one message
+                    break
+                    
+                selected_messages.append(msg)
+                total_tokens += msg_tokens
+            
+            # Reverse back to chronological order for LLM context
+            selected_messages.reverse()
             
             # Convert to DMAssistant format
-            messages = []
-            for msg in history:
-                messages.append({
+            formatted_messages = []
+            for msg in selected_messages:
+                formatted_messages.append({
                     "role": msg["role"],
-                    "content": msg["content"]
+                    "content": msg["content"],
+                    "timestamp": msg["timestamp"]  # Keep timestamp for debugging
                 })
-            return messages
+            
+            logger.info(
+                f"Loaded {len(formatted_messages)} messages (~{total_tokens} tokens) "
+                f"for user {user_id} in server {server_id}"
+            )
+            
+            return formatted_messages
         
         try:
             # Run database operation in thread pool for better concurrency
             loop = asyncio.get_event_loop()
-            messages = await loop.run_in_executor(None, _load_history)
-            
-            logger.debug(f"Loaded {len(messages)} messages for user {user_id} in server {server_id}")
-            return messages
-            
+            return await loop.run_in_executor(None, _load_and_prioritize_history)
         except Exception as e:
-            logger.error(f"Error loading conversation history for user {user_id}: {e}")
+            logger.error(f"Error loading conversation history: {e}")
+            return []
+    
+    async def search_relevant_context(
+        self,
+        user_id: str,
+        server_id: str,
+        user_question: str,
+        max_results: int = 10
+    ) -> List[Dict[str, str]]:
+        """Search for relevant context from conversation history using RAG.
+        
+        Extracts key terms from the user's question and searches through
+        conversation history to find relevant past discussions that might
+        provide additional context for the LLM.
+        
+        Args:
+            user_id: Discord user ID
+            server_id: Discord server ID
+            user_question: Current user question to find context for
+            max_results: Maximum number of relevant messages to return
+            
+        Returns:
+            List of relevant conversation messages for additional context
+        """
+        def _extract_search_terms(question: str) -> List[str]:
+            """Extract meaningful search terms from user question."""
+            import re
+            
+            # Remove common words and extract meaningful terms
+            stop_words = {
+                'what', 'when', 'where', 'who', 'why', 'how', 'is', 'are', 'was', 'were',
+                'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+                'of', 'with', 'by', 'about', 'did', 'do', 'does', 'can', 'could', 'would'
+            }
+            
+            # Extract words (alphanumeric, 3+ chars)
+            words = re.findall(r'\b[a-zA-Z][a-zA-Z0-9]{2,}\b', question.lower())
+            
+            # Filter out stop words and return meaningful terms
+            meaningful_terms = [word for word in words if word not in stop_words]
+            return meaningful_terms[:5]  # Limit to top 5 terms
+        
+        def _search_history():
+            """Search conversation history for relevant context."""
+            conv_db = get_conversation_db()
+            search_terms = _extract_search_terms(user_question)
+            
+            if not search_terms:
+                return []
+                
+            # Search for relevant messages
+            relevant_messages = conv_db.search_conversation_history(
+                user_id=user_id,
+                server_id=server_id,
+                query_terms=search_terms,
+                limit=max_results,
+                days_back=90
+            )
+            
+            # Convert to DMAssistant format
+            formatted_context = []
+            for msg in relevant_messages:
+                formatted_context.append({
+                    "role": msg["role"],
+                    "content": msg["content"],
+                    "timestamp": msg["timestamp"],
+                    "context_type": "historical"  # Mark as historical context
+                })
+            
+            logger.info(
+                f"Found {len(formatted_context)} relevant context messages "
+                f"for terms: {search_terms[:3]}..."
+            )
+            
+            return formatted_context
+        
+        try:
+            # Run search in thread pool
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, _search_history)
+        except Exception as e:
+            logger.error(f"Error searching conversation context: {e}")
             return []
     
     async def store_conversation_messages(self, user_id: str, server_id: str, user_message: str, assistant_response: str) -> None:

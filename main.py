@@ -17,12 +17,29 @@ async def main() -> None:
     """
     logger = logging.getLogger(__name__)
 
-    # Setup logging based on DEBUG setting
+    # Setup logging with file output
     log_level = logging.INFO if settings.DEBUG else logging.WARNING
+    
+    # Create logs directory if it doesn't exist
+    import os
+    logs_dir = os.path.join(os.path.dirname(__file__), "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    # Configure logging with file and console output
+    from datetime import datetime
+    log_filename = f"discord-indexer-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+    log_filepath = os.path.join(logs_dir, log_filename)
+    
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler(log_filepath, encoding='utf-8'),
+            logging.StreamHandler()  # Also log to console
+        ]
     )
+    
+    logger.info(f"Logging to file: {log_filepath}")
 
     logger.info("🚀 Starting Discord Indexer Bot...")
 

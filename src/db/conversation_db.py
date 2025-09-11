@@ -187,7 +187,7 @@ class ConversationDatabase:
                         SELECT user_id, server_id, role, content, timestamp, session_id
                         FROM conversations
                         WHERE user_id = ? AND server_id = ?
-                        ORDER BY timestamp ASC
+                        ORDER BY timestamp DESC
                         LIMIT ?
                     ''', (user_id, server_id, limit))
                 
@@ -212,6 +212,81 @@ class ConversationDatabase:
                 
         except sqlite3.Error as e:
             logger.error(f"Database error retrieving conversation history: {e}")
+            return []
+    
+    def search_conversation_history(
+        self,
+        user_id: str,
+        server_id: str,
+        query_terms: List[str],
+        limit: int = 20,
+        days_back: int = 90
+    ) -> List[Dict[str, Any]]:
+        """Search conversation history using full-text search for RAG context.
+        
+        Searches through conversation history to find relevant messages that
+        might provide additional context for the current question. Uses keyword
+        matching for efficiency (semantic search can be added later with embeddings).
+        
+        Args:
+            user_id: Discord user ID
+            server_id: Discord server/guild ID  
+            query_terms: List of search terms extracted from user's question
+            limit: Maximum number of relevant messages to return
+            days_back: How many days back to search (default 90 days)
+            
+        Returns:
+            List of relevant message dictionaries sorted by relevance/recency
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Build search query with term matching
+                search_conditions = []
+                params = [user_id, server_id]
+                
+                for term in query_terms[:5]:  # Limit to 5 terms for performance
+                    search_conditions.append("content LIKE ?")
+                    params.append(f"%{term}%")
+                
+                if not search_conditions:
+                    return []
+                
+                # Build the SQL query
+                search_sql = f'''
+                    SELECT user_id, server_id, role, content, timestamp, session_id
+                    FROM conversations
+                    WHERE user_id = ? AND server_id = ? 
+                    AND ({" OR ".join(search_conditions)})
+                    AND timestamp > datetime('now', '-{days_back} days')
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                '''
+                
+                params.append(limit)
+                cursor.execute(search_sql, params)
+                
+                rows = cursor.fetchall()
+                
+                messages = []
+                for row in rows:
+                    messages.append({
+                        'user_id': row['user_id'],
+                        'server_id': row['server_id'], 
+                        'role': row['role'],
+                        'content': row['content'],
+                        'timestamp': row['timestamp'],
+                        'session_id': row['session_id']
+                    })
+                
+                logger.debug(
+                    f"Found {len(messages)} relevant messages for search terms: {query_terms[:3]}..."
+                )
+                return messages
+                
+        except sqlite3.Error as e:
+            logger.error(f"Database error searching conversation history: {e}")
             return []
     
     def clear_user_conversation_history(
