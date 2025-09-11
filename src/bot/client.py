@@ -394,6 +394,30 @@ class DiscordBot(commands.Bot):
             # For guild channels (TextChannel, etc.)
             channel_name = getattr(message.channel, 'name', 'Unknown Channel')
 
+        # Extract additional channel metadata for guild channels
+        channel_data = {"id": message.channel.id, "name": channel_name}
+        if hasattr(message.channel, 'type'):
+            channel_data["type"] = str(message.channel.type)
+        if hasattr(message.channel, 'category_id'):
+            channel_data["category_id"] = message.channel.category_id
+        if hasattr(message.channel, 'position'):
+            channel_data["position"] = message.channel.position
+
+        # Extract additional guild metadata
+        guild_data = {"id": guild_id, "name": guild_name}
+        if message.guild:
+            if hasattr(message.guild, 'icon'):
+                guild_data["icon"] = str(message.guild.icon) if message.guild.icon else None
+            if hasattr(message.guild, 'member_count'):
+                guild_data["member_count"] = message.guild.member_count
+            if hasattr(message.guild, 'features'):
+                guild_data["features"] = message.guild.features
+
+        # Extract reply reference if present
+        reference_data = None
+        if message.reference:
+            reference_data = {"message_id": message.reference.message_id}
+
         return {
             "id": message.id,
             "content": message.content,
@@ -401,11 +425,17 @@ class DiscordBot(commands.Bot):
                 "id": message.author.id,
                 "name": message.author.name,
                 "display_name": message.author.display_name,
+                "discriminator": getattr(message.author, 'discriminator', None),
+                "bot": message.author.bot,
+                "system": getattr(message.author, 'system', False)
             },
-            "channel": {"id": message.channel.id, "name": channel_name},
-            "guild": {"id": guild_id, "name": guild_name},
+            "channel": channel_data,
+            "guild": guild_data,
             "timestamp": message.created_at.isoformat(),
+            "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+            "pinned": message.pinned,
+            "reference": reference_data,
             "attachments": [att.url for att in message.attachments],
             "has_embeds": len(message.embeds) > 0,
-            "message_type": str(message.type),
+            "type": str(message.type),
         }
