@@ -37,7 +37,7 @@ def create_conversation_search_tool(user_id: str, server_id: str):
             Formatted conversation history matching the search terms
         """
         try:
-            from ...db.conversation_db import get_conversation_db
+            from src.db.conversation_db import get_conversation_db
             
             # Get database instance
             conv_db = get_conversation_db()

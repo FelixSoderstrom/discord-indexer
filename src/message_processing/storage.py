@@ -7,7 +7,7 @@ ChromaDB automatically handles text embeddings for semantic search.
 import logging
 from typing import Dict, Any, Optional
 
-from ..db import get_db
+from src.db import get_db
 
 
 logger = logging.getLogger(__name__)
