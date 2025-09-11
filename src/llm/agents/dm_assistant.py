@@ -70,9 +70,6 @@ class DMAssistant:
         
         self.logger = logging.getLogger(__name__)
         
-        # Conversation storage: user_id -> list of messages
-        self.conversations: Dict[str, List[Dict[str, str]]] = {}
-        
         # Load system prompt
         self.system_prompt = self._load_system_prompt()
         
@@ -94,44 +91,11 @@ class DMAssistant:
             # Fallback system prompt
             return "You are a helpful Discord DM assistant. Be conversational and friendly."
     
-    def _get_conversation_messages(self, user_id: str) -> List[Dict[str, str]]:
-        """Get conversation history for a user"""
-        if user_id not in self.conversations:
-            self.conversations[user_id] = []
-        return self.conversations[user_id]
-    
-    def _add_message_to_conversation(self, user_id: str, role: str, content: str) -> None:
-        """Add message to conversation history"""
-        conversation = self._get_conversation_messages(user_id)
-        conversation.append({"role": role, "content": content})
-        
-        # Trim conversation if too long (keep system message + recent messages)
-        if len(conversation) > self.max_context_messages:
-            # Keep first message (system) and trim from the middle
-            conversation[:] = conversation[:1] + conversation[-(self.max_context_messages-1):]
-    
-    def _build_full_conversation(self, user_id: str, new_message: str) -> List[Dict[str, str]]:
-        """Build full conversation including system prompt and history"""
+    def _build_stateless_conversation(self, new_message: str) -> List[Dict[str, str]]:
+        """Build stateless conversation with only system prompt and current message"""
         messages = [{"role": "system", "content": self.system_prompt}]
-        
-        # Add conversation history
-        conversation = self._get_conversation_messages(user_id)
-        messages.extend(conversation)
-        
-        # Add new user message
         messages.append({"role": "user", "content": new_message})
-        
         return messages
-    
-    def clear_conversation(self, user_id: str) -> None:
-        """Clear conversation history for a user"""
-        if user_id in self.conversations:
-            del self.conversations[user_id]
-            self.logger.info(f"Cleared conversation for user {user_id}")
-    
-    def get_conversation_length(self, user_id: str) -> int:
-        """Get number of messages in conversation"""
-        return len(self._get_conversation_messages(user_id))
     
     async def respond_to_dm(self, message: str, user_id: str, user_name: str = None, server_id: str = None) -> str:
         """
@@ -148,8 +112,8 @@ class DMAssistant:
         """
         if not server_id:
             return "❌ **Configuration Error**: No server specified for search. Please end conversation and start again with `!ask`."
-        # Build full conversation with context
-        full_conversation = self._build_full_conversation(user_id, message)
+        # Build stateless conversation
+        full_conversation = self._build_stateless_conversation(message)
         
         # Define tool schema for Ollama native tool calling
         tools = [{
@@ -203,10 +167,6 @@ class DMAssistant:
                     response_content[:self.max_response_length - 50] 
                     + "\n\n*[Response truncated]*"
                 )
-            
-            # Add both messages to conversation history
-            self._add_message_to_conversation(user_id, "user", message)
-            self._add_message_to_conversation(user_id, "assistant", response_content)
             
             # Log the interaction
             user_display = user_name or user_id
@@ -283,13 +243,8 @@ class DMAssistant:
     
     def get_stats(self) -> Dict:
         """Get assistant statistics"""
-        total_conversations = len(self.conversations)
-        total_messages = sum(len(conv) for conv in self.conversations.values())
-        
         return {
             "model_name": self.model_name,
-            "active_conversations": total_conversations,
-            "total_messages": total_messages,
-            "max_context_messages": self.max_context_messages,
-            "max_response_length": self.max_response_length
+            "max_response_length": self.max_response_length,
+            "mode": "stateless"
         }

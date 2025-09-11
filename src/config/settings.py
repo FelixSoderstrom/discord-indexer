@@ -14,7 +14,6 @@ class BotSettings(BaseSettings):
     DEBUG: bool = False
     LLM_MODEL_NAME: str
     LANGCHAIN_VERBOSE: bool = False
-    INJECT_CONVERSATION_HISTORY: bool = True
     
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
     

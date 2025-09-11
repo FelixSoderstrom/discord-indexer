@@ -118,35 +118,23 @@ class ConversationQueueWorker:
             # Add timeout handling
             timeout_seconds = 60  # 1 minute timeout
             
-            # Load conversation history if injection is enabled
-            conversation_context = None
-            if settings.INJECT_CONVERSATION_HISTORY and self.use_langchain:
-                logger.info(f"Loading conversation history for user {request.user_id} (history injection enabled)")
-                conversation_context = await self.queue.load_conversation_history(
-                    request.user_id,
-                    request.server_id,
-                    max_messages=8,     # Conservative limit for 8B model
-                    max_tokens=1500     # Keep context moderate to prevent confusion
-                )
-                logger.info(f"Loaded {len(conversation_context) if conversation_context else 0} context messages")
-            else:
-                logger.info(f"Processing fresh request from user {request.user_id} (no conversation history injection)")
+            # Process as stateless chat completion - no conversation history
+            logger.info(f"Processing stateless request from user {request.user_id}")
             
-            # Generate response using DMAssistant
+            # Generate stateless response using DMAssistant
             if self.use_langchain:
-                # LangChain assistant supports conversation context injection
+                # LangChain assistant - stateless completion
                 response = await asyncio.wait_for(
                     self.dm_assistant.respond_to_dm(
                         message=request.message,
                         user_id=request.user_id,
                         user_name=f"User_{request.user_id}",
-                        server_id=request.server_id,
-                        conversation_context=conversation_context
+                        server_id=request.server_id
                     ),
                     timeout=timeout_seconds
                 )
             else:
-                # Legacy assistant - no conversation context support
+                # Legacy assistant - stateless completion
                 response = await asyncio.wait_for(
                     self.dm_assistant.respond_to_dm(
                         message=request.message,
@@ -157,13 +145,7 @@ class ConversationQueueWorker:
                     timeout=timeout_seconds
                 )
             
-            # Store conversation in database
-            await self.queue.store_conversation_messages(
-                request.user_id,
-                request.server_id,
-                request.message,
-                response
-            )
+            # No conversation storage - stateless operation
             
             # Send response back to Discord
             if request.discord_channel:

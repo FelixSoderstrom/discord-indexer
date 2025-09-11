@@ -78,9 +78,6 @@ class LangChainDMAssistant:
         
         self.logger = logging.getLogger(__name__)
         
-        # Conversation storage: user_id -> list of messages
-        self.conversations: Dict[str, List[Dict[str, str]]] = {}
-        
         # Initialize base LangChain components (agent will be created per-server)
         self._initialize_base_langchain()
         
@@ -182,74 +179,21 @@ class LangChainDMAssistant:
 Be conversational, friendly, and helpful. Keep responses under 1800 characters for Discord compatibility.
 Use the search_discord_messages tool when users ask about past conversations or events."""
     
-    def _get_conversation_messages(self, user_id: str) -> List[Dict[str, str]]:
-        """Get conversation history for a user."""
-        if user_id not in self.conversations:
-            self.conversations[user_id] = []
-        return self.conversations[user_id]
-    
-    def _add_message_to_conversation(self, user_id: str, role: str, content: str) -> None:
-        """Add message to conversation history."""
-        conversation = self._get_conversation_messages(user_id)
-        conversation.append({"role": role, "content": content, "timestamp": datetime.now().isoformat()})
-        
-        # Trim conversation if too long
-        if len(conversation) > self.max_context_messages:
-            conversation[:] = conversation[-(self.max_context_messages):]
-    
-    def _build_chat_history(self, user_id: str) -> List:
-        """Build LangChain-compatible chat history."""
-        conversation = self._get_conversation_messages(user_id)
-        chat_history = []
-        
-        for msg in conversation:
-            if msg["role"] == "user":
-                chat_history.append(HumanMessage(content=msg["content"]))
-            elif msg["role"] == "assistant":
-                chat_history.append(AIMessage(content=msg["content"]))
-        
-        return chat_history
-    
-    def _build_chat_history_from_loaded(self, conversation_history: List[Dict[str, str]]) -> List:
-        """Build LangChain-compatible chat history from loaded database messages.
-        
-        To avoid context pollution, we only include recent exchanges (not all history).
-        The current user question will be added separately by the agent framework.
-        """
-        chat_history = []
-        
-        # Only include recent conversation pairs to avoid overwhelming context
-        # Skip very recent messages that might include the current question being processed
-        recent_messages = conversation_history[-10:] if len(conversation_history) > 10 else conversation_history
-        
-        for msg in recent_messages:
-            if msg["role"] == "user":
-                chat_history.append(HumanMessage(content=msg["content"]))
-            elif msg["role"] == "assistant":
-                chat_history.append(AIMessage(content=msg["content"]))
-        
-        # Log context for debugging
-        if len(conversation_history) > len(recent_messages):
-            self.logger.debug(f"Truncated conversation history: using {len(recent_messages)} of {len(conversation_history)} messages")
-        
-        return chat_history
     
     async def respond_to_dm(
         self, 
         message: str, 
         user_id: str, 
         user_name: str = None, 
-        server_id: str = None,
-        conversation_context: List[Dict[str, str]] = None
+        server_id: str = None
     ) -> str:
-        """Generate response using LangChain agent.
+        """Generate stateless response using LangChain agent.
         
         Args:
             message: User's message content
             user_id: Discord user ID
             user_name: Optional user name for logging
             server_id: Discord server ID for tool context (REQUIRED)
-            conversation_context: Optional conversation history to inject as context
             
         Returns:
             Generated response text
@@ -261,14 +205,8 @@ Use the search_discord_messages tool when users ask about past conversations or 
             # Get user+server-specific agent executor
             agent_executor = self._get_or_create_user_server_agent(user_id, server_id)
             
-            # Build chat history from provided context or use empty for fresh conversation
-            if conversation_context:
-                chat_history = self._build_chat_history_from_loaded(conversation_context)
-                self.logger.info(f"Injected {len(chat_history)} messages from conversation history for user {user_id}")
-            else:
-                # Use fresh conversation - no persistent chat history
-                # The LLM will rely on its search tools for previous conversation context
-                chat_history = []
+            # Stateless conversation - no chat history
+            chat_history = []
             
             # Prepare input (no need for server_id since tool is already bound)
             agent_input = {
@@ -292,9 +230,6 @@ Use the search_discord_messages tool when users ask about past conversations or 
                     + "\n\n*[Response truncated]*"
                 )
             
-            # Conversation history now managed by queue worker at database level
-            # No longer storing in-memory since we get history from database
-            
             # Log interaction
             user_display = user_name or user_id
             self.logger.info(f"LangChain DM response generated for {user_display}")
@@ -309,15 +244,6 @@ Use the search_discord_messages tool when users ask about past conversations or 
             self.logger.error(f"Error in LangChain DM response: {e}")
             return "❌ **Processing Error**: I encountered an issue while processing your message. Please try again."
     
-    def clear_conversation(self, user_id: str) -> None:
-        """Clear conversation history for a user."""
-        if user_id in self.conversations:
-            del self.conversations[user_id]
-            self.logger.info(f"Cleared conversation for user {user_id}")
-    
-    def get_conversation_length(self, user_id: str) -> int:
-        """Get number of messages in conversation."""
-        return len(self._get_conversation_messages(user_id))
     
     def health_check(self) -> bool:
         """Check if the assistant is healthy and ready."""
@@ -331,16 +257,11 @@ Use the search_discord_messages tool when users ask about past conversations or 
     
     def get_stats(self) -> Dict[str, Any]:
         """Get assistant statistics."""
-        total_conversations = len(self.conversations)
-        total_messages = sum(len(conv) for conv in self.conversations.values())
-        
         return {
             "model_name": self.model_name,
-            "active_conversations": total_conversations,
-            "total_messages": total_messages,
-            "max_context_messages": self.max_context_messages,
             "max_response_length": self.max_response_length,
             "framework": "LangChain",
+            "mode": "stateless",
             "user_server_agents_cached": len(self._user_server_agents),
             "cached_user_server_pairs": list(self._user_server_agents.keys()) if self._user_server_agents else []
         }
