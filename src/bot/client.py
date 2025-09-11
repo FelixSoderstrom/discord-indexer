@@ -201,78 +201,145 @@ class DiscordBot(commands.Bot):
             
         return success
     
-    async def process_historical_messages_through_pipeline(self) -> bool:
-        """Process all historical messages through the pipeline with server separation.
+    async def resume_indexing_from_checkpoints(self) -> bool:
+        """Resume message indexing from last indexed timestamps per server.
         
-        Processes each server separately to ensure messages go to correct databases.
-        Maintains batching within each server for efficient processing.
+        Checks each server's indexing status and processes only messages newer 
+        than the last indexed timestamp. Maintains server separation and 
+        chronological ordering.
         
         Returns:
-            True if all historical messages processed successfully, False if failed
+            True if all servers processed successfully, False if failed
         """
         if not self.message_pipeline:
-            self.logger.error("Message pipeline not available for historical processing")
+            self.logger.error("Message pipeline not available for resumption processing")
             return False
             
         channels_by_guild = self.get_channels_by_guild()
         
         if not channels_by_guild:
-            self.logger.info("No channels available for historical processing")
+            self.logger.info("No channels available for resumption processing")
             return True
 
         total_guilds = len(channels_by_guild)
-        total_channels = sum(len(channels) for channels in channels_by_guild.values())
-        self.logger.info(f"Processing {total_channels} channels across {total_guilds} servers for historical messages...")
+        self.logger.info(f"Starting smart resumption for {total_guilds} servers...")
 
         try:
             overall_total_processed = 0
             
-            # Process each server separately
+            # Process each server separately with resumption logic
             for guild_id, guild_channels in channels_by_guild.items():
-                self.logger.info(f"Processing server {guild_id} with {len(guild_channels)} channels")
+                self.logger.info(f"Checking resumption status for server {guild_id}")
+                
+                # Get resumption info for this server
+                from ..message_processing.storage import get_server_indexing_status
+                server_status = get_server_indexing_status(guild_id)
+                
+                self.logger.info(f"Server {guild_id} status: {server_status['status']}, "
+                               f"{server_status['message_count']} messages indexed")
+                
                 server_total_processed = 0
                 
-                # Process channels in batches within this server
-                for i in range(0, len(guild_channels), 5):  # Process 5 channels at a time
-                    channel_batch = guild_channels[i:i+5]
+                # Determine processing strategy based on server status
+                if server_status['needs_full_processing']:
+                    # Server needs full historical processing
+                    self.logger.info(f"Server {guild_id}: Full historical processing required")
                     
-                    self.logger.info(f"Server {guild_id}: Fetching messages from channels {i+1}-{min(i+5, len(guild_channels))} of {len(guild_channels)}")
-                    
-                    # Fetch messages from this batch of channels
-                    raw_messages = await self.rate_limiter.batch_fetch_messages(
-                        channels=channel_batch,
-                        messages_per_channel=1000,
-                        max_concurrent_channels=5,
-                    )
-                    
-                    if raw_messages:
-                        # Process raw messages into structured data
-                        batch_messages = [self._extract_message_data(msg) for msg in raw_messages]
+                    # Process channels in batches within this server
+                    for i in range(0, len(guild_channels), 5):  # Process 5 channels at a time
+                        channel_batch = guild_channels[i:i+5]
                         
-                        # Send batch to pipeline and wait for completion
-                        success = await self.send_batch_to_pipeline(batch_messages)
+                        self.logger.info(f"Server {guild_id}: Full processing channels {i+1}-{min(i+5, len(guild_channels))} of {len(guild_channels)}")
                         
-                        if not success:
-                            self.logger.error(f"Failed to process historical message batch for server {guild_id}")
-                            return False
+                        # Fetch all historical messages from this batch of channels
+                        raw_messages = await self.rate_limiter.batch_fetch_messages(
+                            channels=channel_batch,
+                            messages_per_channel=1000,
+                            max_concurrent_channels=5,
+                        )
                         
-                        server_total_processed += len(batch_messages)
-                        overall_total_processed += len(batch_messages)
-                        self.logger.info(f"Server {guild_id}: Processed {server_total_processed} messages so far")
+                        if raw_messages:
+                            # Process raw messages into structured data
+                            batch_messages = [self._extract_message_data(msg) for msg in raw_messages]
+                            
+                            # Send batch to pipeline and wait for completion
+                            success = await self.send_batch_to_pipeline(batch_messages)
+                            
+                            if not success:
+                                self.logger.error(f"Failed to process full historical batch for server {guild_id}")
+                                return False
+                            
+                            server_total_processed += len(batch_messages)
+                        
+                        # Update processed channels list
+                        for channel in channel_batch:
+                            self.processed_channels.append(channel.id)
+                
+                elif server_status['resumption_recommended']:
+                    # Server can resume from last timestamp
+                    last_timestamp = server_status['last_indexed_timestamp']
+                    self.logger.info(f"Server {guild_id}: Resuming from {last_timestamp}")
                     
-                    # Update processed channels list
-                    for channel in channel_batch:
+                    # Process channels in batches within this server
+                    for i in range(0, len(guild_channels), 5):  # Process 5 channels at a time
+                        channel_batch = guild_channels[i:i+5]
+                        
+                        self.logger.info(f"Server {guild_id}: Resumption processing channels {i+1}-{min(i+5, len(guild_channels))} of {len(guild_channels)}")
+                        
+                        # Fetch messages newer than last indexed timestamp
+                        raw_messages = await self.rate_limiter.batch_fetch_messages_after_timestamp(
+                            channels=channel_batch,
+                            after_timestamp=last_timestamp,
+                            messages_per_channel=1000,
+                            max_concurrent_channels=5,
+                        )
+                        
+                        if raw_messages:
+                            # Process raw messages into structured data
+                            batch_messages = [self._extract_message_data(msg) for msg in raw_messages]
+                            
+                            # Send batch to pipeline and wait for completion
+                            success = await self.send_batch_to_pipeline(batch_messages)
+                            
+                            if not success:
+                                self.logger.error(f"Failed to process resumption batch for server {guild_id}")
+                                return False
+                            
+                            server_total_processed += len(batch_messages)
+                        
+                        # Update processed channels list
+                        for channel in channel_batch:
+                            self.processed_channels.append(channel.id)
+                
+                else:
+                    # Server is fully up to date
+                    self.logger.info(f"Server {guild_id}: Already up to date, skipping")
+                    # Still mark channels as processed for tracking
+                    for channel in guild_channels:
                         self.processed_channels.append(channel.id)
                 
-                self.logger.info(f"Server {guild_id} processing completed. Processed {server_total_processed} messages")
+                overall_total_processed += server_total_processed
+                self.logger.info(f"Server {guild_id} resumption completed. Processed {server_total_processed} new messages")
 
-            self.logger.info(f"All servers processed successfully. Total processed: {overall_total_processed} messages")
+            self.logger.info(f"Smart resumption completed successfully. Total processed: {overall_total_processed} new messages")
             return True
             
         except (discord.HTTPException, asyncio.TimeoutError, MemoryError, 
                 ValueError, IndexError, RuntimeError) as e:
-            self.logger.error(f"Error during historical message processing: {e}")
+            self.logger.error(f"Error during smart resumption processing: {e}")
             return False
+
+    async def process_historical_messages_through_pipeline(self) -> bool:
+        """Legacy method - redirects to smart resumption processing.
+        
+        DEPRECATED: Use resume_indexing_from_checkpoints() directly.
+        This method is kept for compatibility during transition.
+        
+        Returns:
+            True if all historical messages processed successfully, False if failed
+        """
+        self.logger.warning("Using legacy process_historical_messages_through_pipeline - redirecting to smart resumption")
+        return await self.resume_indexing_from_checkpoints()
 
     async def get_all_historical_messages(self) -> List[Dict[str, Any]]:
         """Legacy method for fetching all historical messages without pipeline processing.

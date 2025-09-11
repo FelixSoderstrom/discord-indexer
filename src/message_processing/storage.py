@@ -5,7 +5,7 @@ ChromaDB automatically handles text embeddings for semantic search.
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from ..db import get_db
 
@@ -103,4 +103,58 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
     except Exception as e:
         logger.error(f"Failed to store message {message_id}: {e}")
         return False
-            
+
+
+def get_server_indexing_status(server_id: int) -> Dict[str, Any]:
+    """Get comprehensive indexing status for a server.
+    
+    Args:
+        server_id: Discord server/guild ID
+        
+    Returns:
+        Dictionary with indexing status information
+        
+    Note:
+        Never raises exceptions - returns safe defaults with error info
+    """
+    try:
+        # Import here to avoid circular imports
+        from .resumption import get_resumption_info
+        
+        logger.debug(f"Getting indexing status for server {server_id}")
+        resumption_info = get_resumption_info(server_id)
+        
+        # Determine status based on resumption info
+        if resumption_info.message_count == 0:
+            status = "empty"
+        elif resumption_info.needs_full_processing:
+            status = "needs_full_processing"
+        elif resumption_info.resumption_recommended:
+            status = "can_resume"
+        else:
+            status = "up_to_date"
+        
+        result = {
+            "server_id": server_id,
+            "message_count": resumption_info.message_count,
+            "last_indexed_timestamp": resumption_info.last_indexed_timestamp,
+            "needs_full_processing": resumption_info.needs_full_processing,
+            "resumption_recommended": resumption_info.resumption_recommended,
+            "status": status,
+            "error": None
+        }
+        
+        logger.debug(f"Server {server_id} status: {status}, {resumption_info.message_count} messages")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Failed to get indexing status for server {server_id}: {e.__class__.__name__}: {e}")
+        return {
+            "server_id": server_id,
+            "message_count": 0,
+            "last_indexed_timestamp": None,
+            "needs_full_processing": True,
+            "resumption_recommended": False,
+            "status": "error",
+            "error": f"{e.__class__.__name__}: {str(e)}"
+        }

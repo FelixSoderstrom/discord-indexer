@@ -4,6 +4,7 @@ import logging
 from typing import Optional, List, Dict, Any, Callable, Awaitable
 from dataclasses import dataclass
 from collections import deque
+from datetime import datetime
 import discord
 
 
@@ -195,6 +196,86 @@ class DiscordRateLimiter:
                 all_messages.extend(result)
 
         self.logger.info(f"Batch fetch complete: {len(all_messages)} total raw messages")
+        return all_messages
+
+    async def batch_fetch_messages_after_timestamp(
+        self,
+        channels: List[discord.TextChannel],
+        after_timestamp: str,
+        messages_per_channel: int = 1000,
+        max_concurrent_channels: int = 5,
+    ) -> List[discord.Message]:
+        """
+        Fetch messages from multiple channels after a specific timestamp.
+
+        Args:
+            channels: List of Discord text channels to fetch from
+            after_timestamp: ISO timestamp string - fetch messages newer than this
+            messages_per_channel: Maximum messages to fetch per channel
+            max_concurrent_channels: Maximum channels to fetch from simultaneously
+
+        Returns:
+            List of all fetched messages newer than the timestamp
+        """
+        self.logger.info(f"Starting batch fetch from {len(channels)} channels after {after_timestamp}")
+
+        try:
+            # Parse the timestamp to datetime object for Discord API
+            after_datetime = datetime.fromisoformat(after_timestamp.replace('Z', '+00:00'))
+        except ValueError as e:
+            self.logger.error(f"Invalid timestamp format '{after_timestamp}': {e}")
+            return []
+
+        # Create semaphore to limit concurrent channel fetching
+        channel_semaphore = asyncio.Semaphore(max_concurrent_channels)
+
+        async def fetch_channel_messages_after(
+            channel: discord.TextChannel,
+        ) -> List[discord.Message]:
+            """Fetch messages from a single channel after timestamp with rate limiting."""
+            async with channel_semaphore:
+                self.logger.debug(f"Fetching messages from #{channel.name} after {after_timestamp}")
+
+                async def api_call():
+                    messages = []
+                    try:
+                        async for message in channel.history(
+                            limit=messages_per_channel, 
+                            oldest_first=True, 
+                            after=after_datetime
+                        ):
+                            messages.append(message)
+                    except discord.Forbidden:
+                        self.logger.warning(f"No permission to read #{channel.name}")
+                        return []
+                    except discord.HTTPException as e:
+                        self.logger.error(f"HTTP error fetching from #{channel.name}: {e}")
+                        return []
+                    return messages
+
+                # Execute with rate limiting
+                messages = await self.execute_with_rate_limit(api_call)
+
+                self.logger.info(
+                    f"Fetched {len(messages)} new messages from #{channel.name}"
+                )
+                return messages
+
+        # Fetch from all channels with controlled concurrency
+        tasks = [fetch_channel_messages_after(channel) for channel in channels]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Combine results and handle any errors
+        all_messages = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                self.logger.error(
+                    f"Error fetching from channel {channels[i].name}: {result}"
+                )
+            else:
+                all_messages.extend(result)
+
+        self.logger.info(f"Batch resumption fetch complete: {len(all_messages)} total new messages")
         return all_messages
 
 
