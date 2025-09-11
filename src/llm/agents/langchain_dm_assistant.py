@@ -239,7 +239,8 @@ Use the search_discord_messages tool when users ask about past conversations or 
         message: str, 
         user_id: str, 
         user_name: str = None, 
-        server_id: str = None
+        server_id: str = None,
+        conversation_context: List[Dict[str, str]] = None
     ) -> str:
         """Generate response using LangChain agent.
         
@@ -248,6 +249,7 @@ Use the search_discord_messages tool when users ask about past conversations or 
             user_id: Discord user ID
             user_name: Optional user name for logging
             server_id: Discord server ID for tool context (REQUIRED)
+            conversation_context: Optional conversation history to inject as context
             
         Returns:
             Generated response text
@@ -259,9 +261,14 @@ Use the search_discord_messages tool when users ask about past conversations or 
             # Get user+server-specific agent executor
             agent_executor = self._get_or_create_user_server_agent(user_id, server_id)
             
-            # Use fresh conversation - no persistent chat history
-            # The LLM will rely on its search tools for previous conversation context
-            chat_history = []
+            # Build chat history from provided context or use empty for fresh conversation
+            if conversation_context:
+                chat_history = self._build_chat_history_from_loaded(conversation_context)
+                self.logger.info(f"Injected {len(chat_history)} messages from conversation history for user {user_id}")
+            else:
+                # Use fresh conversation - no persistent chat history
+                # The LLM will rely on its search tools for previous conversation context
+                chat_history = []
             
             # Prepare input (no need for server_id since tool is already bound)
             agent_input = {
