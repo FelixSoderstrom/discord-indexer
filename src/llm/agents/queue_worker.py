@@ -110,23 +110,10 @@ class ConversationQueueWorker:
             # Add timeout handling
             timeout_seconds = 60  # 1 minute timeout
             
-            # Load conversation history
-            history = await asyncio.wait_for(
-                self.queue.load_conversation_history(
-                    request.user_id, 
-                    request.server_id,
-                    limit=20
-                ),
-                timeout=timeout_seconds
-            )
+            # No conversation history loading - LLM will use search tools when needed
+            logger.info(f"Processing fresh request from user {request.user_id} (no conversation history injection)")
             
-            # Add conversation history to DMAssistant (if any)
-            if history:
-                # DMAssistant will handle the conversation context
-                # For now, we use the existing respond_to_dm method
-                pass
-            
-            # Generate response using DMAssistant with timeout
+            # Generate response using DMAssistant (fresh conversation each time)
             response = await asyncio.wait_for(
                 self.dm_assistant.respond_to_dm(
                     message=request.message,

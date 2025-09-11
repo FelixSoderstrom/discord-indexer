@@ -10,12 +10,24 @@ import asyncio
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
+# Enable LangChain debugging when configured
+try:
+    from ...config.settings import settings
+    if settings.LANGCHAIN_VERBOSE:
+        import langchain
+        langchain.debug = True
+        langchain.verbose = True
+        print("🐛 LangChain verbose mode enabled")
+except ImportError:
+    pass
+
 from langchain_ollama import ChatOllama
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from .tools.langchain_search_tool import create_server_specific_search_tool
+from .tools.conversation_search_tool import create_conversation_search_tool
 
 try:
     from ...config.settings import settings
@@ -73,7 +85,7 @@ class LangChainDMAssistant:
         self._initialize_base_langchain()
         
         # Server-specific agents cache: server_id -> AgentExecutor
-        self._server_agents: Dict[str, AgentExecutor] = {}
+        self._user_server_agents: Dict[str, AgentExecutor] = {}  # Key: f"{user_id}:{server_id}"
     
     def _initialize_base_langchain(self):
         """Initialize base LangChain components (LLM and prompt)."""
@@ -103,26 +115,32 @@ class LangChainDMAssistant:
             self.logger.error(f"Failed to initialize base LangChain components: {e}")
             raise
     
-    def _get_or_create_server_agent(self, server_id: str) -> AgentExecutor:
-        """Get or create an agent executor bound to a specific server.
+    def _get_or_create_user_server_agent(self, user_id: str, server_id: str) -> AgentExecutor:
+        """Get or create an agent executor bound to a specific user and server.
         
         Args:
+            user_id: Discord user ID
             server_id: Discord server ID
             
         Returns:
-            AgentExecutor configured for this server
+            AgentExecutor configured for this user and server
         """
-        # Check if we already have an agent for this server
-        if server_id in self._server_agents:
-            return self._server_agents[server_id]
+        # Check if we already have an agent for this user+server
+        agent_key = f"{user_id}:{server_id}"
+        if agent_key in self._user_server_agents:
+            return self._user_server_agents[agent_key]
         
         try:
-            # Create server-specific search tool
+            # Create server-specific search tool (Discord messages)
             server_search_tool = create_server_specific_search_tool(server_id)
-            server_tools = [server_search_tool]
             
-            # Create agent for this server
-            server_agent = create_tool_calling_agent(
+            # Create conversation search tool for this specific user
+            conv_search_tool = create_conversation_search_tool(user_id, server_id)
+            
+            server_tools = [server_search_tool, conv_search_tool]
+            
+            # Create agent for this user+server
+            user_server_agent = create_tool_calling_agent(
                 llm=self.llm,
                 tools=server_tools,
                 prompt=self.prompt
@@ -130,7 +148,7 @@ class LangChainDMAssistant:
             
             # Create agent executor
             agent_executor = AgentExecutor(
-                agent=server_agent,
+                agent=user_server_agent,
                 tools=server_tools,
                 verbose=True,
                 max_iterations=3,
@@ -139,9 +157,9 @@ class LangChainDMAssistant:
             )
             
             # Cache the agent executor
-            self._server_agents[server_id] = agent_executor
+            self._user_server_agents[agent_key] = agent_executor
             
-            self.logger.info(f"Created server-specific agent for server {server_id}")
+            self.logger.info(f"Created user-specific agent for user {user_id} in server {server_id}")
             return agent_executor
             
         except Exception as e:
@@ -192,6 +210,30 @@ Use the search_discord_messages tool when users ask about past conversations or 
         
         return chat_history
     
+    def _build_chat_history_from_loaded(self, conversation_history: List[Dict[str, str]]) -> List:
+        """Build LangChain-compatible chat history from loaded database messages.
+        
+        To avoid context pollution, we only include recent exchanges (not all history).
+        The current user question will be added separately by the agent framework.
+        """
+        chat_history = []
+        
+        # Only include recent conversation pairs to avoid overwhelming context
+        # Skip very recent messages that might include the current question being processed
+        recent_messages = conversation_history[-10:] if len(conversation_history) > 10 else conversation_history
+        
+        for msg in recent_messages:
+            if msg["role"] == "user":
+                chat_history.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "assistant":
+                chat_history.append(AIMessage(content=msg["content"]))
+        
+        # Log context for debugging
+        if len(conversation_history) > len(recent_messages):
+            self.logger.debug(f"Truncated conversation history: using {len(recent_messages)} of {len(conversation_history)} messages")
+        
+        return chat_history
+    
     async def respond_to_dm(
         self, 
         message: str, 
@@ -214,11 +256,12 @@ Use the search_discord_messages tool when users ask about past conversations or 
             return "❌ **Configuration Error**: No server specified for search. Please end conversation and start again with `!ask`."
         
         try:
-            # Get server-specific agent executor
-            agent_executor = self._get_or_create_server_agent(server_id)
+            # Get user+server-specific agent executor
+            agent_executor = self._get_or_create_user_server_agent(user_id, server_id)
             
-            # Build chat history
-            chat_history = self._build_chat_history(user_id)
+            # Use fresh conversation - no persistent chat history
+            # The LLM will rely on its search tools for previous conversation context
+            chat_history = []
             
             # Prepare input (no need for server_id since tool is already bound)
             agent_input = {
@@ -242,9 +285,8 @@ Use the search_discord_messages tool when users ask about past conversations or 
                     + "\n\n*[Response truncated]*"
                 )
             
-            # Add messages to conversation history
-            self._add_message_to_conversation(user_id, "user", message)
-            self._add_message_to_conversation(user_id, "assistant", response_content)
+            # Conversation history now managed by queue worker at database level
+            # No longer storing in-memory since we get history from database
             
             # Log interaction
             user_display = user_name or user_id
@@ -292,6 +334,6 @@ Use the search_discord_messages tool when users ask about past conversations or 
             "max_context_messages": self.max_context_messages,
             "max_response_length": self.max_response_length,
             "framework": "LangChain",
-            "server_agents_cached": len(self._server_agents),
-            "available_servers": list(self._server_agents.keys()) if self._server_agents else []
+            "user_server_agents_cached": len(self._user_server_agents),
+            "cached_user_server_pairs": list(self._user_server_agents.keys()) if self._user_server_agents else []
         }
