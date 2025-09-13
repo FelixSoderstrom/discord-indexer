@@ -139,7 +139,12 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
             return
         else:
             # Handle non-command DMs - provide helpful guidance
-            await handle_dm_message(bot, message)
+            try:
+                await handle_dm_message(bot, message)
+            except (discord.HTTPException, discord.Forbidden, discord.NotFound) as e:
+                logger.error(f"Discord error handling DM from {message.author.name}: {e}")
+            except (asyncio.TimeoutError, ConnectionError) as e:
+                logger.error(f"Connection error handling DM from {message.author.name}: {e}")
         return
     
     # Handle server/guild messages for indexing
@@ -259,7 +264,8 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
                             message_count=message_count
                         ))
                         
-                except Exception as e:
+                except (OSError, FileNotFoundError, PermissionError, ValueError, 
+                        ImportError, AttributeError, KeyError, TypeError) as e:
                     # Log error but continue - this server just won't be available
                     logger.warning(f"Error checking indexing data for server {server_id} ({server_name}): {e}")
                     continue
@@ -483,7 +489,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         )
         embed.add_field(name="Queue Failed", value=str(queue_stats["total_failed"]), inline=True)
         
-        embed.set_footer(text=f"Latency: {round(bot.latency * 1000)}ms | Session Timeout: {session_stats['timeout_minutes']}min")
+        embed.set_footer(text=f"Latency: {round(bot.latency * 1000)}ms | Processing: Stateless Queue")
         
         await ctx.send(embed=embed)
     

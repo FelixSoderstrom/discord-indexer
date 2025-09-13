@@ -81,7 +81,7 @@ class SearchTool:
             logger.debug(f"Found {len(formatted_results)} results for query: {query[:50]}")
             return formatted_results
             
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError, KeyError, AttributeError, RuntimeError) as e:
             logger.error(f"Error searching messages for server {self.server_id}: {e}")
             return []
     

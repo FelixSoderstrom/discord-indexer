@@ -12,6 +12,12 @@ from dataclasses import dataclass
 from enum import Enum
 
 try:
+    import discord
+except ImportError:
+    # Fallback for testing without discord.py
+    discord = None
+
+try:
     from src.db.conversation_db import get_conversation_db
 except ImportError:
     # Fallback for testing
@@ -201,7 +207,7 @@ class ConversationQueue:
                 try:
                     status_message = await request.discord_channel.fetch_message(request.status_message_id)
                     await status_message.edit(content=status_text)
-                except:
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException) if discord else (AttributeError,):
                     # If editing fails, send new message
                     new_message = await request.discord_channel.send(status_text)
                     request.status_message_id = new_message.id
@@ -210,7 +216,7 @@ class ConversationQueue:
                 new_message = await request.discord_channel.send(status_text)
                 request.status_message_id = new_message.id
                 
-        except Exception as e:
+        except (discord.HTTPException, discord.Forbidden, ConnectionError, AttributeError) if discord else (AttributeError, ConnectionError) as e:
             logger.error(f"Error updating status for user {request.user_id}: {e}")
     
     def get_stats(self) -> Dict[str, int]:

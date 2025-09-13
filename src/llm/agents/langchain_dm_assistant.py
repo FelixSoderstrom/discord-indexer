@@ -108,7 +108,7 @@ class LangChainDMAssistant:
             
             self.logger.info(f"LangChain DM Assistant base components initialized with model: {self.model_name}")
             
-        except Exception as e:
+        except (ImportError, ValueError, ConnectionError, RuntimeError, AttributeError) as e:
             self.logger.error(f"Failed to initialize base LangChain components: {e}")
             raise
     
@@ -159,7 +159,7 @@ class LangChainDMAssistant:
             self.logger.info(f"Created user-specific agent for user {user_id} in server {server_id}")
             return agent_executor
             
-        except Exception as e:
+        except (ImportError, ValueError, ConnectionError, RuntimeError, AttributeError) as e:
             self.logger.error(f"Failed to create server agent for {server_id}: {e}")
             raise
     
@@ -240,7 +240,7 @@ Use the search_discord_messages tool when users ask about past conversations or 
             self.logger.error(f"LangChain agent timeout for user {user_id}")
             return "⏰ **Request Timeout**: Your request took too long to process. Please try a simpler question."
         
-        except Exception as e:
+        except (ValueError, RuntimeError, ConnectionError, AttributeError) as e:
             self.logger.error(f"Error in LangChain DM response: {e}")
             return "❌ **Processing Error**: I encountered an issue while processing your message. Please try again."
     
@@ -251,7 +251,7 @@ Use the search_discord_messages tool when users ask about past conversations or 
             # Test the LLM connection
             test_response = self.llm.invoke([HumanMessage(content="test")])
             return bool(test_response.content)
-        except Exception as e:
+        except (ValueError, RuntimeError, ConnectionError, AttributeError, TimeoutError) as e:
             self.logger.error(f"Health check failed: {e}")
             return False
     

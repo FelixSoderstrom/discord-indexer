@@ -83,7 +83,7 @@ def create_conversation_search_tool(user_id: str, server_id: str):
             
             return "\n".join(formatted_results)
             
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError, KeyError, AttributeError, ImportError, RuntimeError) as e:
             error_msg = f"Error searching conversation history: {str(e)}"
             logger.error(error_msg)
             return f"I'm sorry, I couldn't search our conversation history right now. {error_msg}"

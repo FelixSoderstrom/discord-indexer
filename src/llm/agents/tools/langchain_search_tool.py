@@ -51,7 +51,7 @@ def create_server_specific_search_tool(server_id: str):
             logger.info(f"Server-bound search executed: query='{query}', server={server_id}, results={len(results)}")
             return formatted_results
             
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError, KeyError, AttributeError, RuntimeError) as e:
             logger.error(f"Error in server-bound search tool for server {server_id}: {e}")
             return f"Search failed: Unable to query message history for this server. Error: {str(e)}"
     
@@ -91,7 +91,7 @@ def search_discord_messages(query: str, server_id: str, limit: int = 5) -> str:
         logger.info(f"LangChain search executed: query='{query}', server={server_id}, results={len(results)}")
         return formatted_results
         
-    except Exception as e:
+    except (ConnectionError, TimeoutError, ValueError, KeyError, AttributeError, RuntimeError) as e:
         logger.error(f"Error in LangChain search tool: {e}")
         return f"Search failed: Unable to query message history. Error: {str(e)}"
 

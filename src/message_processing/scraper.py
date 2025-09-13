@@ -25,7 +25,7 @@ def _scrape_page(url: str) -> str:
         
         return downloaded
         
-    except Exception as e:
+    except (ConnectionError, TimeoutError, OSError, ValueError) as e:
         logger.error(f"Error scraping page {url}: {e}")
         raise MessageProcessingError(f"Error scraping page {url}: {e}")
 
@@ -46,6 +46,6 @@ def _clean_page(html_content: str, url: str) -> str:
         
         return cleaned_content
         
-    except Exception as e:
+    except (ValueError, TypeError, AttributeError, RuntimeError) as e:
         logger.error(f"Error cleaning content for URL {url}: {e}")
         raise MessageProcessingError(f"Failed to clean content for URL {url}: {e}")

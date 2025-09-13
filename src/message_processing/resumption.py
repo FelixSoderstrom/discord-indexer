@@ -52,7 +52,7 @@ def get_last_indexed_timestamp(server_id: int) -> Optional[str]:
         collection_name = "messages"
         try:
             collection = db_client.get_collection(collection_name)
-        except Exception:
+        except (ValueError, RuntimeError, ChromaError):
             # Collection doesn't exist, no messages indexed
             logger.info(f"No messages collection found for server {server_id}")
             return None
@@ -86,7 +86,7 @@ def get_last_indexed_timestamp(server_id: int) -> Optional[str]:
         
         return latest_timestamp
         
-    except Exception as e:
+    except (ChromaError, ValueError, TypeError, ConnectionError, OSError, MemoryError) as e:
         logger.error(f"Failed to get last indexed timestamp for server {server_id}: {e}")
         raise
 
@@ -149,7 +149,7 @@ def get_resumption_info(server_id: int) -> ResumptionInfo:
         # Get last indexed timestamp
         try:
             last_timestamp = get_last_indexed_timestamp(server_id)
-        except Exception as e:
+        except (ChromaError, ValueError, TypeError, ConnectionError, OSError, MemoryError) as e:
             logger.warning(f"Server {server_id}: Failed to get last timestamp ({e.__class__.__name__}), defaulting to full processing")
             return ResumptionInfo(
                 server_id=server_id,
@@ -192,16 +192,6 @@ def get_resumption_info(server_id: int) -> ResumptionInfo:
     except (OSError, PermissionError, ChromaError, RuntimeError, ValueError, TypeError) as e:
         logger.error(f"Failed to get resumption info for server {server_id}: {e.__class__.__name__}: {e}")
         # Default to full processing on any error
-        return ResumptionInfo(
-            server_id=server_id,
-            last_indexed_timestamp=None,
-            message_count=0,
-            needs_full_processing=True,
-            resumption_recommended=False
-        )
-    except Exception as e:
-        logger.critical(f"Unexpected error getting resumption info for server {server_id}: {e.__class__.__name__}: {e}")
-        # Default to full processing on unexpected errors
         return ResumptionInfo(
             server_id=server_id,
             last_indexed_timestamp=None,

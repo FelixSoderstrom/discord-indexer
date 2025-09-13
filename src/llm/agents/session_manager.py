@@ -280,7 +280,7 @@ class SessionManager:
             except asyncio.CancelledError:
                 logger.info("Cleanup loop cancelled")
                 break
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, AttributeError, ConnectionError) as e:
                 logger.error(f"Error in session cleanup loop: {e}")
                 await asyncio.sleep(5.0)
     
@@ -314,7 +314,7 @@ class SessionManager:
                         f"due to {self.timeout_minutes} minutes of inactivity. "
                         f"Use `!ask` to start a new conversation."
                     )
-                except Exception as e:
+                except (AttributeError, ConnectionError, RuntimeError) as e:
                     logger.error(f"Error notifying user {session.user_id} of session expiry: {e}")
         
         # Notify users of server selection timeout
@@ -328,7 +328,7 @@ class SessionManager:
                         f"Your question was: \"{selection.original_question[:100]}{'...' if len(selection.original_question) > 100 else ''}\"\n\n"
                         f"Use `!ask` again to restart."
                     )
-                except Exception as e:
+                except (AttributeError, ConnectionError, RuntimeError) as e:
                     logger.error(f"Error notifying user {selection.user_id} of server selection timeout: {e}")
     
     def get_session_count(self) -> int:

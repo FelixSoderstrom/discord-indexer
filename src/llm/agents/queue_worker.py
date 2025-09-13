@@ -8,6 +8,12 @@ import asyncio
 import logging
 from typing import Optional
 
+try:
+    import discord
+except ImportError:
+    # Fallback for testing without discord.py
+    discord = None
+
 from src.llm.agents.conversation_queue import get_conversation_queue, ConversationRequest
 from src.llm.agents.dm_assistant import DMAssistant
 from src.llm.agents.langchain_dm_assistant import LangChainDMAssistant
@@ -99,7 +105,7 @@ class ConversationQueueWorker:
             except asyncio.CancelledError:
                 logger.info("Worker loop cancelled")
                 break
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, AttributeError, ConnectionError) as e:
                 logger.error(f"Error in worker loop: {e}")
                 await asyncio.sleep(5.0)  # Brief pause before retrying
     
@@ -152,7 +158,7 @@ class ConversationQueueWorker:
                 try:
                     await request.discord_channel.send(response)
                     logger.info(f"Response sent to user {request.user_id}")
-                except Exception as e:
+                except (discord.HTTPException, discord.Forbidden, ConnectionError, AttributeError) if discord else (AttributeError, ConnectionError) as e:
                     logger.error(f"Error sending response to Discord for user {request.user_id}: {e}")
                     return False
             else:
@@ -170,11 +176,11 @@ class ConversationQueueWorker:
                         "⏰ **Request Timeout**: Your request took too long to process. "
                         "Please try again with a simpler question."
                     )
-                except Exception as e:
+                except (discord.HTTPException, discord.Forbidden, ConnectionError, AttributeError) if discord else (AttributeError, ConnectionError) as e:
                     logger.error(f"Error sending timeout notification to user {request.user_id}: {e}")
             
             return False
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, AttributeError, ConnectionError, ImportError) as e:
             logger.error(f"Error processing request for user {request.user_id}: {e}")
             
             # Notify user of error
@@ -184,7 +190,7 @@ class ConversationQueueWorker:
                         "❌ **Processing Error**: Something went wrong while processing your request. "
                         "Please try again later."
                     )
-                except Exception as e:
+                except (discord.HTTPException, discord.Forbidden, ConnectionError, AttributeError) if discord else (AttributeError, ConnectionError) as e:
                     logger.error(f"Error sending error notification to user {request.user_id}: {e}")
             
             return False

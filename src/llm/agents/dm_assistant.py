@@ -174,7 +174,7 @@ class DMAssistant:
             
             return response_content
             
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError, KeyError, AttributeError, RuntimeError) as e:
             self.logger.error(f"Error in DM response generation: {e}")
             return "Sorry, I'm having trouble processing your message right now. Please try again later."
     
@@ -232,7 +232,7 @@ class DMAssistant:
             
             return final_response['message']['content']
             
-        except Exception as e:
+        except (ConnectionError, TimeoutError, ValueError, KeyError, AttributeError, RuntimeError) as e:
             self.logger.error(f"Error handling native tool calls: {e}")
             return "I tried to search the message history but encountered an error. Please try rephrasing your question."
             

@@ -8,6 +8,7 @@ import logging
 from typing import Dict, Any, Optional
 
 from src.db import get_db
+from chromadb.errors import ChromaError
 
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
         collection_name = "messages"
         try:
             collection = db_client.get_collection(collection_name)
-        except Exception:
+        except (ValueError, RuntimeError) as e:
             collection = db_client.create_collection(collection_name)
             logger.info(f"Created collection '{collection_name}' for server {server_id}")
         
@@ -100,7 +101,7 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
         logger.info(f"Stored message {message_id} in ChromaDB")
         return True
         
-    except Exception as e:
+    except (ChromaError, ValueError, TypeError, ConnectionError, OSError, MemoryError) as e:
         logger.error(f"Failed to store message {message_id}: {e}")
         return False
 
@@ -147,7 +148,7 @@ def get_server_indexing_status(server_id: int) -> Dict[str, Any]:
         logger.debug(f"Server {server_id} status: {status}, {resumption_info.message_count} messages")
         return result
         
-    except Exception as e:
+    except (ImportError, AttributeError, KeyError, ValueError, TypeError, OSError) as e:
         logger.error(f"Failed to get indexing status for server {server_id}: {e.__class__.__name__}: {e}")
         return {
             "server_id": server_id,

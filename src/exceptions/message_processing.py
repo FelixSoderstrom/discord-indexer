@@ -9,5 +9,6 @@ class MessageProcessingError(Exception):
     
     Triggering this exception automatically stops a single message from being processed and continues with the next one.
     """
-    def __init__(self):
-        logger.warning("Message processing failed.")
+    def __init__(self, message: str = "Message processing failed"):
+        super().__init__(message)
+        logger.warning(f"Message processing failed: {message}")
