@@ -1,12 +1,15 @@
-"""LangChain tool for searching conversation history database.
+"""LangChain tool for searching user's conversation history with the assistant.
 
-Allows the LLM to search through its own conversation history with users
-when they reference previous conversations or need context.
+Provides access to the user's previous conversations with the AI assistant
+for context-aware responses and continuity across stateless interactions.
 """
 
 import logging
 from typing import List, Dict, Any
 from langchain_core.tools import tool
+
+from src.db.conversation_db import get_conversation_db
+
 
 logger = logging.getLogger(__name__)
 
@@ -15,100 +18,136 @@ def create_conversation_search_tool(user_id: str, server_id: str):
     """Create a conversation search tool for a specific user and server.
     
     Args:
-        user_id: Discord user ID to search conversations for
-        server_id: Discord server ID to bind this tool to
+        user_id: Discord user ID
+        server_id: Discord server ID (or "0" for DMs)
         
     Returns:
-        LangChain tool that can search conversation history
+        LangChain tool that can search this user's conversation history
     """
     @tool
-    def search_conversation_history(query: str, limit: int = 10) -> str:
-        """Search through previous conversations with this user.
+    def search_conversation_history(query_terms: str, limit: int = 10) -> str:
+        """Search the user's conversation history with the assistant.
         
-        Use this tool when the user references previous conversations, says things
-        like "remember when...", "you told me before...", or expects you to know
-        something from past interactions.
+        Use this tool to find relevant context from previous conversations
+        with this user. Helps provide continuity and reference past discussions.
         
         Args:
-            query: Search terms to find relevant conversations
-            limit: Maximum number of conversation messages to return (default 10)
+            query_terms: Space-separated search terms to find in conversation history
+            limit: Maximum number of messages to return (default: 10)
             
         Returns:
-            Formatted conversation history matching the search terms
+            Formatted string with relevant conversation history
         """
         try:
-            from src.db.conversation_db import get_conversation_db
-            
-            # Get database instance
+            # Get conversation database
             conv_db = get_conversation_db()
             
-            # Extract search terms from query
-            search_terms = _extract_search_terms(query)
+            # Use "0" as server_id for DM contexts
+            effective_server_id = server_id if server_id else "0"
             
-            if not search_terms:
-                return "No valid search terms found. Please provide specific keywords to search for."
+            # Split query terms and search
+            terms = query_terms.strip().split()
+            if not terms:
+                return "No search terms provided."
             
             # Search conversation history
             results = conv_db.search_conversation_history(
                 user_id=user_id,
-                server_id=server_id,
-                query_terms=search_terms,
+                server_id=effective_server_id,
+                query_terms=terms,
                 limit=limit,
                 days_back=90  # Search last 90 days
             )
             
             if not results:
-                return f"No previous conversations found matching '{query}'. This might be the first time we've discussed this topic."
+                return "No relevant conversation history found."
             
-            # Format results for LLM
+            # Format results
             formatted_results = []
-            formatted_results.append(f"Found {len(results)} relevant conversation messages:")
+            formatted_results.append(f"Found {len(results)} relevant messages from conversation history:")
             formatted_results.append("")
             
-            for i, msg in enumerate(results, 1):
-                role = "You" if msg["role"] == "assistant" else "User"
-                timestamp = msg.get("timestamp", "unknown time")
-                content = msg["content"]
+            for msg in results:
+                role_icon = "=d" if msg['role'] == 'user' else ">"
+                timestamp = msg['timestamp'][:19] if msg['timestamp'] else "Unknown"
+                content = msg['content'][:200] + "..." if len(msg['content']) > 200 else msg['content']
                 
-                # Truncate very long messages
-                if len(content) > 200:
-                    content = content[:200] + "..."
-                
-                formatted_results.append(f"{i}. [{timestamp}] {role}: {content}")
+                formatted_results.append(f"{role_icon} {msg['role'].title()} [{timestamp}]:")
+                formatted_results.append(f"   {content}")
+                formatted_results.append("")
             
-            formatted_results.append("")
-            formatted_results.append("Use this context to provide a more informed response.")
+            result_text = "\n".join(formatted_results)
             
-            logger.info(f"Conversation search found {len(results)} results for query: {query[:50]}...")
+            logger.info(f"Conversation search executed: user={user_id}, server={effective_server_id}, terms={terms}, results={len(results)}")
+            return result_text
             
-            return "\n".join(formatted_results)
-            
-        except (ConnectionError, TimeoutError, ValueError, KeyError, AttributeError, ImportError, RuntimeError) as e:
-            error_msg = f"Error searching conversation history: {str(e)}"
-            logger.error(error_msg)
-            return f"I'm sorry, I couldn't search our conversation history right now. {error_msg}"
+        except (ConnectionError, TimeoutError, ValueError, KeyError, AttributeError, RuntimeError) as e:
+            logger.error(f"Error in conversation search tool: {e}")
+            return f"Search failed: Unable to query conversation history. Error: {str(e)}"
     
-    # Customize the tool description with user context
-    search_conversation_history.description = f"Search through previous conversations with this user. Use when they reference past discussions or expect continuity from previous interactions."
+    # Update tool metadata
+    search_conversation_history.name = "search_conversation_history"
+    search_conversation_history.description = f"Search conversation history between user {user_id} and the assistant for context and continuity."
     
     return search_conversation_history
 
 
-def _extract_search_terms(query: str) -> List[str]:
-    """Extract meaningful search terms from a query string."""
-    import re
+@tool
+def search_user_conversation_history(user_id: str, server_id: str, query_terms: str, limit: int = 10) -> str:
+    """Search a user's conversation history with the assistant.
     
-    # Remove common words
-    stop_words = {
-        'what', 'when', 'where', 'who', 'why', 'how', 'is', 'are', 'was', 'were',
-        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-        'of', 'with', 'by', 'about', 'did', 'do', 'does', 'can', 'could', 'would',
-        'you', 'me', 'i', 'we', 'they', 'he', 'she', 'it', 'that', 'this'
-    }
+    Use this tool to find relevant context from previous conversations
+    with the specified user. Helps provide continuity across stateless interactions.
     
-    # Extract words (alphanumeric, 3+ chars)
-    words = re.findall(r'\b[a-zA-Z][a-zA-Z0-9]{2,}\b', query.lower())
-    
-    # Filter out stop words and return meaningful terms
-    meaningful_terms = [word for word in words if word not in stop_words]
-    return meaningful_terms[:5]  # Limit to top 5 terms
+    Args:
+        user_id: Discord user ID
+        server_id: Discord server ID (use "0" for DMs)
+        query_terms: Space-separated search terms
+        limit: Maximum number of messages to return (default: 10)
+        
+    Returns:
+        Formatted string with relevant conversation history
+    """
+    try:
+        # Get conversation database
+        conv_db = get_conversation_db()
+        
+        # Split query terms and search
+        terms = query_terms.strip().split()
+        if not terms:
+            return "No search terms provided."
+        
+        # Search conversation history
+        results = conv_db.search_conversation_history(
+            user_id=user_id,
+            server_id=server_id,
+            query_terms=terms,
+            limit=limit,
+            days_back=90  # Search last 90 days
+        )
+        
+        if not results:
+            return "No relevant conversation history found."
+        
+        # Format results
+        formatted_results = []
+        formatted_results.append(f"Found {len(results)} relevant messages from conversation history:")
+        formatted_results.append("")
+        
+        for msg in results:
+            role_icon = "=d" if msg['role'] == 'user' else ">"
+            timestamp = msg['timestamp'][:19] if msg['timestamp'] else "Unknown"
+            content = msg['content'][:200] + "..." if len(msg['content']) > 200 else msg['content']
+            
+            formatted_results.append(f"{role_icon} {msg['role'].title()} [{timestamp}]:")
+            formatted_results.append(f"   {content}")
+            formatted_results.append("")
+        
+        result_text = "\n".join(formatted_results)
+        
+        logger.info(f"Conversation search executed: user={user_id}, server={server_id}, terms={terms}, results={len(results)}")
+        return result_text
+        
+    except (ConnectionError, TimeoutError, ValueError, KeyError, AttributeError, RuntimeError) as e:
+        logger.error(f"Error in conversation search tool: {e}")
+        return f"Search failed: Unable to query conversation history. Error: {str(e)}"

@@ -79,6 +79,47 @@ class ConversationQueueWorker:
         
         logger.info("Queue worker stopped")
     
+    async def _log_conversation_message(
+        self, 
+        user_id: str, 
+        server_id: str, 
+        role: str, 
+        content: str
+    ) -> None:
+        """Log a conversation message to the database.
+        
+        Args:
+            user_id: Discord user ID
+            server_id: Discord server ID (or "0" for DMs)
+            role: Message role ('user' or 'assistant')
+            content: Message content
+        """
+        try:
+            from src.db.conversation_db import get_conversation_db
+            
+            # Get conversation database instance
+            conv_db = get_conversation_db()
+            
+            # For DM contexts (when server_id might be None), use "0" as the server ID
+            effective_server_id = server_id if server_id else "0"
+            
+            # Add message to conversation history
+            success = conv_db.add_message(
+                user_id=user_id,
+                server_id=effective_server_id,
+                role=role,
+                content=content
+            )
+            
+            if success:
+                logger.debug(f"Logged {role} message for user {user_id} in server {effective_server_id}")
+            else:
+                logger.warning(f"Failed to log {role} message for user {user_id} in server {effective_server_id}")
+                
+        except (ImportError, AttributeError, ConnectionError, RuntimeError) as e:
+            logger.error(f"Error logging conversation message: {e}")
+            # Don't raise the exception - conversation logging failure shouldn't stop message processing
+    
     async def _worker_loop(self) -> None:
         """Main worker loop that processes requests."""
         logger.info("Queue worker loop started")
@@ -118,6 +159,8 @@ class ConversationQueueWorker:
         Returns:
             True if processed successfully, False otherwise
         """
+        user_message_logged = False
+        
         try:
             logger.info(f"Processing request for user {request.user_id}")
             
@@ -126,6 +169,15 @@ class ConversationQueueWorker:
             
             # Process as stateless chat completion - no conversation history
             logger.info(f"Processing stateless request from user {request.user_id}")
+            
+            # Log user message to database before processing
+            await self._log_conversation_message(
+                user_id=request.user_id,
+                server_id=request.server_id,
+                role="user",
+                content=request.message
+            )
+            user_message_logged = True
             
             # Generate stateless response using DMAssistant
             if self.use_langchain:
@@ -151,7 +203,13 @@ class ConversationQueueWorker:
                     timeout=timeout_seconds
                 )
             
-            # No conversation storage - stateless operation
+            # Log LLM response to database after processing
+            await self._log_conversation_message(
+                user_id=request.user_id,
+                server_id=request.server_id,
+                role="assistant",
+                content=response
+            )
             
             # Send response back to Discord
             if request.discord_channel:
@@ -169,13 +227,28 @@ class ConversationQueueWorker:
         except asyncio.TimeoutError:
             logger.error(f"Request timed out for user {request.user_id} after {timeout_seconds} seconds")
             
+            # Log the user message if not already logged
+            if not user_message_logged:
+                await self._log_conversation_message(
+                    user_id=request.user_id,
+                    server_id=request.server_id,
+                    role="user",
+                    content=request.message
+                )
+            
+            # Log the timeout as an assistant response
+            timeout_response = "⏰ **Request Timeout**: Your request took too long to process. Please try again with a simpler question."
+            await self._log_conversation_message(
+                user_id=request.user_id,
+                server_id=request.server_id,
+                role="assistant",
+                content=timeout_response
+            )
+            
             # Notify user of timeout
             if request.discord_channel:
                 try:
-                    await request.discord_channel.send(
-                        "⏰ **Request Timeout**: Your request took too long to process. "
-                        "Please try again with a simpler question."
-                    )
+                    await request.discord_channel.send(timeout_response)
                 except (discord.HTTPException, discord.Forbidden, ConnectionError, AttributeError) if discord else (AttributeError, ConnectionError) as e:
                     logger.error(f"Error sending timeout notification to user {request.user_id}: {e}")
             
@@ -183,13 +256,28 @@ class ConversationQueueWorker:
         except (RuntimeError, ValueError, TypeError, AttributeError, ConnectionError, ImportError) as e:
             logger.error(f"Error processing request for user {request.user_id}: {e}")
             
+            # Log the user message if not already logged
+            if not user_message_logged:
+                await self._log_conversation_message(
+                    user_id=request.user_id,
+                    server_id=request.server_id,
+                    role="user",
+                    content=request.message
+                )
+            
+            # Log the error as an assistant response
+            error_response = "❌ **Processing Error**: Something went wrong while processing your request. Please try again later."
+            await self._log_conversation_message(
+                user_id=request.user_id,
+                server_id=request.server_id,
+                role="assistant",
+                content=error_response
+            )
+            
             # Notify user of error
             if request.discord_channel:
                 try:
-                    await request.discord_channel.send(
-                        "❌ **Processing Error**: Something went wrong while processing your request. "
-                        "Please try again later."
-                    )
+                    await request.discord_channel.send(error_response)
                 except (discord.HTTPException, discord.Forbidden, ConnectionError, AttributeError) if discord else (AttributeError, ConnectionError) as e:
                     logger.error(f"Error sending error notification to user {request.user_id}: {e}")
             
