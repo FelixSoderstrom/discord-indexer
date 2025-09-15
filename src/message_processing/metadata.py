@@ -19,12 +19,14 @@ def prepare_author_metadata(author_data: Dict[str, Any]) -> Dict[str, Any]:
         author_data: Author information from Discord message
         
     Returns:
-        Normalized author metadata dictionary
+        Normalized author metadata dictionary with all display name variants
     """
     return {
         'author_id': author_data.get('id'),
         'author_name': author_data.get('name'),
         'author_display_name': author_data.get('display_name'),
+        'author_global_name': author_data.get('global_name'),
+        'author_nick': author_data.get('nick'),
         'author_discriminator': author_data.get('discriminator'),
         'author_bot': author_data.get('bot', False),
         'author_system': author_data.get('system', False)

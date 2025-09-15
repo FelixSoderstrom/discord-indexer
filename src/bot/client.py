@@ -425,6 +425,8 @@ class DiscordBot(commands.Bot):
                 "id": message.author.id,
                 "name": message.author.name,
                 "display_name": message.author.display_name,
+                "global_name": getattr(message.author, 'global_name', None),
+                "nick": getattr(message.author, 'nick', None),
                 "discriminator": getattr(message.author, 'discriminator', None),
                 "bot": message.author.bot,
                 "system": getattr(message.author, 'system', False)
