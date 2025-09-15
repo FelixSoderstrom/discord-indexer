@@ -31,12 +31,16 @@ def create_server_specific_search_tool(server_id: str):
         or what someone said about something. This tool searches THIS SERVER's
         message history using semantic similarity.
         
+        IMPORTANT: Results will show users by their display names (friendly names) 
+        rather than technical usernames. You can search using any name variation
+        (display name, username, nickname) and find the same user's messages.
+        
         Args:
-            query: Search query (e.g., "standup meeting", "project deadline", "tetris")
+            query: Search query (e.g., "standup meeting", "project deadline", "John Doe messages", "what did sarah say about")
             limit: Maximum number of results to return (default: 5, max: 10)
             
         Returns:
-            Formatted string with search results including author, channel, timestamp, and content
+            Formatted string with search results including author display name, channel, timestamp, and content
         """
         try:
             # Create search tool for the bound server
@@ -70,13 +74,17 @@ def search_discord_messages(query: str, server_id: str, limit: int = 5) -> str:
     or what someone said about something. Searches the server's message history
     using semantic similarity.
     
+    IMPORTANT: Results will show users by their display names (friendly names) 
+    rather than technical usernames. You can search using any name variation
+    (display name, username, nickname) and find the same user's messages.
+    
     Args:
-        query: Search query (e.g., "standup meeting", "project deadline", "Carl XVI Gustaf")
+        query: Search query (e.g., "standup meeting", "project deadline", "John Doe messages", "what did sarah say about")
         server_id: Discord server ID to search within (REQUIRED - no default)
         limit: Maximum number of results to return (default: 5, max: 10)
         
     Returns:
-        Formatted string with search results including author, channel, timestamp, and content
+        Formatted string with search results including author display name, channel, timestamp, and content
     """
     try:
         # Create search tool for the server

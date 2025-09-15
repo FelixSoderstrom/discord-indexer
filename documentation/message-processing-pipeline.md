@@ -9,16 +9,16 @@ The Discord Message Processing Pipeline is the core system responsible for trans
 The pipeline follows a modular architecture with clear separation of concerns:
 
 ```
-Raw Discord Messages ’ MessagePipeline ’ ChromaDB Storage
-                          “
+Raw Discord Messages ï¿½ MessagePipeline ï¿½ ChromaDB Storage
+                          ï¿½
                     [Content Analysis]
-                          “
+                          ï¿½
                     [Metadata Processing]
-                          “
+                          ï¿½
                     [URL Extraction & Scraping]
-                          “
+                          ï¿½
                     [Embedding Generation]
-                          “
+                          ï¿½
                     [Database Storage]
 ```
 
@@ -72,7 +72,7 @@ Discord message metadata is extracted and normalized into standardized formats:
 - Edit status, pin status, reply relationships
 
 #### Author Metadata
-- User ID, name, display name, discriminator
+- User ID, name, display name variants (display_name, global_name, nick), discriminator
 - Bot and system flags
 
 #### Channel Metadata
@@ -137,7 +137,7 @@ Final processed data is stored in ChromaDB:
 
 #### Metadata Schema
 - Message identifiers (message_id, author_id, channel_id, guild_id)
-- Human-readable names (author_name, channel_name, guild_name)
+- Human-readable names (author_name, author_display_name, author_global_name, author_nick, channel_name, guild_name)
 - Temporal data (timestamp)
 - Processing flags (urls_found, has_link_summaries)
 

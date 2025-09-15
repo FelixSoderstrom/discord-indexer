@@ -70,9 +70,18 @@ class SearchTool:
                     results['metadatas'][0],
                     results['distances'][0]
                 )):
+                    # Determine best display name to show (prioritize friendly names over technical usernames)
+                    # Priority order: computed display name > global display name > server nickname > username/handle
+                    author_display = (
+                        metadata.get('author_display_name') or 
+                        metadata.get('author_global_name') or 
+                        metadata.get('author_nick') or 
+                        metadata.get('author_name', 'Unknown')
+                    )
+                    
                     formatted_results.append({
                         'content': doc,
-                        'author': metadata.get('author_name', 'Unknown'),
+                        'author': author_display,
                         'channel': metadata.get('channel_name', 'Unknown'),
                         'timestamp': metadata.get('timestamp', ''),
                         'relevance_score': round(1.0 - distance, 3)  # Convert distance to relevance
@@ -94,8 +103,10 @@ class SearchTool:
         return f"""
 search_messages: Search Discord message history for relevant content
 - Use this when users ask about past conversations or specific topics
-- Query should be descriptive (e.g., "standup meeting", "project deadline", "bug report")
-- Returns up to {self.max_results} most relevant messages with author and timestamp
+- Query should be descriptive (e.g., "standup meeting", "project deadline", "John Doe messages", "what did sarah say about")
+- Returns up to {self.max_results} most relevant messages with author display names and timestamp
+- Results show friendly display names rather than technical usernames
+- Can search using any name variation (display name, username, nickname) for the same user
 - Only searches messages from this Discord server
 """
     
