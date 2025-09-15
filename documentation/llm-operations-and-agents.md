@@ -184,11 +184,10 @@ def _get_or_create_user_server_agent(self, user_id: str, server_id: str) -> Agen
     
     if agent_key not in self._user_server_agents:
         server_search_tool = create_server_specific_search_tool(server_id)
-        conv_search_tool = create_conversation_search_tool(user_id, server_id)
         
         agent_executor = AgentExecutor(
-            agent=create_tool_calling_agent(self.llm, [server_search_tool, conv_search_tool], self.prompt),
-            tools=[server_search_tool, conv_search_tool],
+            agent=create_tool_calling_agent(self.llm, [server_search_tool], self.prompt),
+            tools=[server_search_tool],
             max_iterations=3,
             max_execution_time=30,
             handle_parsing_errors=True
@@ -257,28 +256,6 @@ def create_server_specific_search_tool(server_id: str):
 - Structured result formatting with metadata
 - Configurable result limits (default 5, max 10)
 
-#### 2. Conversation History Search (`src/llm/agents/tools/conversation_search_tool.py`)
-Relational database search for conversation continuity:
-
-```python
-def create_conversation_search_tool(user_id: str, server_id: str):
-    @tool
-    def search_conversation_history(query: str, limit: int = 10) -> str:
-        conv_db = get_conversation_db()
-        results = conv_db.search_conversation_history(
-            user_id=user_id,
-            server_id=server_id,
-            query_terms=_extract_search_terms(query),
-            limit=limit,
-            days_back=90
-        )
-```
-
-**Features:**
-- User-specific conversation search
-- Intelligent search term extraction
-- Temporal filtering (90-day lookback)
-- Formatted conversation context
 
 ### Context Synthesis Strategy
 
@@ -286,7 +263,7 @@ The RAG system emphasizes accurate information retrieval:
 
 #### Search Result Processing
 1. **Query Analysis**: Extract meaningful search terms from user input
-2. **Multi-Source Search**: Query both vector database and conversation history
+2. **Vector Database Search**: Query Discord message history via semantic similarity
 3. **Result Ranking**: Semantic similarity scoring and temporal relevance
 4. **Context Building**: Structured formatting for LLM consumption
 
@@ -303,7 +280,7 @@ The RAG system emphasizes accurate information retrieval:
 #### 1. DMAssistant (Conversation Agent)
 - **Primary Role**: User interaction and query processing
 - **Capabilities**: Natural language understanding, tool orchestration
-- **Context**: Server-specific message search and conversation history
+- **Context**: Server-specific message search via vector database
 - **Performance**: Sub-5-second response times for typical queries
 
 #### 2. Link Analyzer (Content Processing Agent)
@@ -336,7 +313,7 @@ def _get_or_create_user_server_agent(self, user_id: str, server_id: str):
 
 While agents operate independently, they share:
 - **Common LLM Client**: Shared Ollama connection pool
-- **Search Infrastructure**: Common ChromaDB and conversation database access
+- **Search Infrastructure**: Common ChromaDB access for message search
 - **Configuration**: Unified settings and performance parameters
 - **Logging**: Centralized logging for debugging and monitoring
 
@@ -356,14 +333,11 @@ def create_server_specific_search_tool(server_id: str):
         # ... execute search within server context
 ```
 
-#### User-Specific Binding
-```python
-def create_conversation_search_tool(user_id: str, server_id: str):
-    @tool
-    def search_conversation_history(query: str, limit: int = 10) -> str:
-        # Tool is pre-bound to user_id and server_id
-        # ... search only this user's conversation history
-```
+#### Tool Specialization
+Tools are designed for specific purposes:
+- Server-specific tools prevent cross-server data leaks
+- Vector search provides semantic similarity matching
+- Results are formatted for optimal LLM consumption
 
 ### Search Result Formatting
 
@@ -382,16 +356,6 @@ Found 3 relevant messages:
 Use this information to answer the user's question about standup meetings.
 ```
 
-#### Conversation History Results
-```text
-Found 2 relevant conversation messages:
-
-1. [2024-01-14 15:20] You: "Remember that we discussed the database migration strategy last week"
-
-2. [2024-01-14 15:21] User: "Yes, we decided to use the blue-green deployment approach"
-
-Use this context to provide a more informed response.
-```
 
 ### Performance Optimization
 

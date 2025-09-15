@@ -27,7 +27,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from src.llm.agents.tools.langchain_search_tool import create_server_specific_search_tool
-from src.llm.agents.tools.conversation_search_tool import create_conversation_search_tool
 
 try:
     from src.config.settings import settings
@@ -131,10 +130,7 @@ class LangChainDMAssistant:
             # Create server-specific search tool (Discord messages)
             server_search_tool = create_server_specific_search_tool(server_id)
             
-            # Create conversation search tool for this specific user
-            conv_search_tool = create_conversation_search_tool(user_id, server_id)
-            
-            server_tools = [server_search_tool, conv_search_tool]
+            server_tools = [server_search_tool]
             
             # Create agent for this user+server
             user_server_agent = create_tool_calling_agent(
@@ -177,7 +173,7 @@ class LangChainDMAssistant:
             self.logger.error(f"Error loading system prompt: {e}")
             return """You are a helpful Discord DM assistant with access to search Discord message history. 
 Be conversational, friendly, and helpful. Keep responses under 1800 characters for Discord compatibility.
-Use the search_discord_messages tool when users ask about past conversations or events."""
+Use the search_messages tool when users ask about past conversations or events in this Discord server."""
     
     
     async def respond_to_dm(
