@@ -31,6 +31,17 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
         bot: DiscordBot instance with message processing capabilities
     """
     logger = logging.getLogger(__name__)
+    
+    # Log guild connection information (replicated from client.py to avoid circular calls)
+    logger.info(f"{bot.user} has connected to Discord!")
+    logger.info(f"Bot is in {len(bot.guilds)} guild(s)")
+
+    # Log available guilds and channels
+    for guild in bot.guilds:
+        logger.info(f"Connected to guild: {guild.name} (ID: {guild.id})")
+        logger.debug(f"  - Text channels: {len(guild.text_channels)}")
+        logger.debug(f"  - Total channels: {len(guild.channels)}")
+    
     logger.info("=== Bot is ready! Starting message processing... ===")
     
     # Initialize message pipeline with coordination event
@@ -43,13 +54,17 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
     try:
         from src.llm.agents.langchain_dm_assistant import LangChainDMAssistant
         bot.dm_assistant = LangChainDMAssistant()
+        logger.info("✅ LangChain DMAssistant base components initialized")
         
-        # Verify model is available and healthy
-        if bot.dm_assistant.health_check():
-            logger.info("✅ LangChain DMAssistant initialized successfully with model ready")
+        # Verify model is available and healthy (async - non-blocking)
+        logger.info("🔍 Running async LLM health check (may take time for initial model load)...")
+        health_check_passed = await bot.dm_assistant.health_check_async(timeout_seconds=120.0)
+        
+        if health_check_passed:
+            logger.info("✅ LangChain DMAssistant model health check passed - ready for requests")
         else:
             logger.error("❌ LangChain DMAssistant model health check failed")
-            raise RuntimeError("LangChain DMAssistant model not available")
+            raise RuntimeError("LangChain DMAssistant model not available or not responsive")
         
         # Session manager removed in Phase 1 - now using stateless queue-based processing
         logger.info("✅ Using stateless queue-based processing (no session manager needed)")

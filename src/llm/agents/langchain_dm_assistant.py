@@ -242,13 +242,113 @@ Use the search_messages tool when users ask about past conversations or events i
     
     
     def health_check(self) -> bool:
-        """Check if the assistant is healthy and ready."""
+        """Check if the assistant is healthy and ready (synchronous version - deprecated).
+        
+        Warning: This method blocks the async event loop and should not be used
+        during bot startup. Use health_check_async() instead.
+        """
+        self.logger.warning("Using deprecated synchronous health_check(). Use health_check_async() instead.")
         try:
             # Test the LLM connection
             test_response = self.llm.invoke([HumanMessage(content="test")])
             return bool(test_response.content)
         except (ValueError, RuntimeError, ConnectionError, AttributeError, TimeoutError) as e:
             self.logger.error(f"Health check failed: {e}")
+            return False
+    
+    async def health_check_async(self, timeout_seconds: float = 60.0, quick_mode: bool = False) -> bool:
+        """Check if the assistant is healthy and ready (async version).
+        
+        Args:
+            timeout_seconds: Maximum time to wait for health check completion
+            quick_mode: If True, only check server connectivity without model invocation
+            
+        Returns:
+            True if the assistant is healthy and responsive, False otherwise
+        """
+        try:
+            self.logger.info("🔍 Starting async LLM health check...")
+            
+            # First, do a quick Ollama server connectivity check
+            self.logger.info("⚡ Checking Ollama server connectivity...")
+            if not await self._check_ollama_server_async():
+                self.logger.error("❌ Ollama server not accessible - ensure Ollama is running")
+                return False
+            
+            self.logger.info("✅ Ollama server is accessible")
+            
+            # In quick mode, skip the model invocation test
+            if quick_mode:
+                self.logger.info("⚡ Quick mode enabled - skipping model invocation test")
+                return True
+            
+            # Check if model is already loaded to set expectations
+            from src.llm.utils import is_model_loaded
+            model_already_loaded = await asyncio.get_running_loop().run_in_executor(
+                None, is_model_loaded, self.model_name
+            )
+            
+            if model_already_loaded:
+                self.logger.info("🤖 Testing model responsiveness (model already loaded - should be fast)...")
+            else:
+                self.logger.info("🤖 Testing model responsiveness (triggering model load - may take 30-60s)...")
+            
+            loop = asyncio.get_running_loop()
+            
+            def _sync_health_check():
+                """Internal synchronous health check for executor."""
+                test_response = self.llm.invoke([HumanMessage(content="test")])
+                return bool(test_response.content)
+            
+            # Run the synchronous health check in a thread pool with timeout
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, _sync_health_check),
+                timeout=timeout_seconds
+            )
+            
+            if result:
+                self.logger.info("✅ LLM health check passed - model is responsive")
+            else:
+                self.logger.error("❌ LLM health check failed - model returned empty response")
+            
+            return result
+            
+        except asyncio.TimeoutError:
+            self.logger.error(f"❌ LLM health check timed out after {timeout_seconds}s (likely model loading)")
+            return False
+        except (ValueError, RuntimeError, ConnectionError, AttributeError) as e:
+            self.logger.error(f"❌ LLM health check failed: {e}")
+            return False
+    
+    async def _check_ollama_server_async(self) -> bool:
+        """Check if Ollama server is accessible (async version).
+        
+        Returns:
+            True if Ollama server is accessible, False otherwise
+        """
+        try:
+            # Use the existing Ollama client to do a lightweight server check
+            from src.llm.utils import get_ollama_client
+            
+            loop = asyncio.get_running_loop()
+            
+            def _sync_server_check():
+                """Internal sync check for Ollama server."""
+                client = get_ollama_client()
+                # Simple list models call to check server connectivity
+                models = client.list()
+                return bool(models.get("models"))
+            
+            # Run server check in executor with short timeout
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, _sync_server_check),
+                timeout=5.0
+            )
+            
+            return result
+            
+        except (asyncio.TimeoutError, ConnectionError, OSError, ValueError, KeyError, RuntimeError) as e:
+            self.logger.debug(f"Ollama server check failed: {e}")
             return False
     
     def get_stats(self) -> Dict[str, Any]:

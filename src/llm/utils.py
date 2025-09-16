@@ -161,6 +161,39 @@ def get_model_max_context(model_name: str) -> int:
         return 2048
 
 
+def is_model_loaded(model_name: str) -> bool:
+    """Check if a model is currently loaded in Ollama memory.
+    
+    Args:
+        model_name: Name of the model to check
+        
+    Returns:
+        True if model is loaded in memory, False otherwise
+    """
+    try:
+        client = get_ollama_client()
+        
+        # Use show command to check if model is loaded
+        # A loaded model will have process info
+        import subprocess
+        result = subprocess.run(
+            ['ollama', 'ps'], 
+            capture_output=True, 
+            text=True, 
+            timeout=10
+        )
+        
+        if result.returncode == 0:
+            # Check if our model is in the running processes
+            return model_name in result.stdout
+        
+        return False
+        
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError) as e:
+        logger.debug(f"Error checking model loaded status for {model_name}: {e}")
+        return False
+
+
 def unload_model_from_memory(model_name: str) -> bool:
     """
     Instantly unload a model from ollama memory

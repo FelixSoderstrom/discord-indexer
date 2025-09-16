@@ -49,10 +49,11 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
     # 1. Initialize message processing pipeline
     bot.message_pipeline = MessagePipeline(completion_event=bot.pipeline_ready)
     
-    # 2. Initialize LangChain DMAssistant with health check
+    # 2. Initialize LangChain DMAssistant with async health check
     bot.dm_assistant = LangChainDMAssistant()
-    if not bot.dm_assistant.health_check():
-        raise RuntimeError("LangChain DMAssistant model not available")
+    health_check_passed = await bot.dm_assistant.health_check_async(timeout_seconds=120.0)
+    if not health_check_passed:
+        raise RuntimeError("LangChain DMAssistant model not available or not responsive")
     
     # 3. Start queue worker for conversation processing
     queue_worker = initialize_queue_worker(use_langchain=True)
