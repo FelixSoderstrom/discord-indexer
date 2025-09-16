@@ -50,7 +50,19 @@ This project is in active development. Core functionality targets include reliab
 
 ## Installation
 
-*Installation instructions will be added as development progresses.*
+# Setup Instructions
+
+1. Download & Install Ollama --> (https://ollama.com/download/windows)
+
+2. Open up a terminal and run this command:
+
+`ollama pull llama3.1:8b`
+
+3. In your terminal run `pip install -r requirements.txt` from the root directory.
+
+4. In the same terminal run: `python main.py`
+
+5. Enjoy
 
 ## Usage
 
