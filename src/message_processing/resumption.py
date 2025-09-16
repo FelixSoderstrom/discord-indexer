@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Optional, NamedTuple
 from pathlib import Path
 from src.db import get_db
-from chromadb.errors import ChromaError
+from chromadb.errors import ChromaError, NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ def get_last_indexed_timestamp(server_id: int) -> Optional[str]:
         collection_name = "messages"
         try:
             collection = db_client.get_collection(collection_name)
-        except (ValueError, RuntimeError, ChromaError):
+        except (NotFoundError, ValueError, RuntimeError, ChromaError):
             # Collection doesn't exist, no messages indexed
             logger.info(f"No messages collection found for server {server_id}")
             return None
@@ -124,7 +124,7 @@ def get_resumption_info(server_id: int) -> ResumptionInfo:
         try:
             collection = db_client.get_collection(collection_name)
             message_count = collection.count()
-        except (ValueError, RuntimeError, ChromaError) as e:
+        except (NotFoundError, ValueError, RuntimeError, ChromaError) as e:
             # Collection doesn't exist or is corrupted, needs full processing
             logger.info(f"Server {server_id}: No messages collection ({e.__class__.__name__}) - full processing needed")
             return ResumptionInfo(

@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Any, Optional
 
 from src.db import get_db
-from chromadb.errors import ChromaError
+from chromadb.errors import ChromaError, NotFoundError
 
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
         collection_name = "messages"
         try:
             collection = db_client.get_collection(collection_name)
-        except (ValueError, RuntimeError) as e:
+        except (NotFoundError, ValueError, RuntimeError) as e:
             collection = db_client.create_collection(collection_name)
             logger.info(f"Created collection '{collection_name}' for server {server_id}")
         
