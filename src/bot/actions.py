@@ -1,4 +1,5 @@
 import discord
+import asyncio
 from discord.ext import commands
 import logging
 import sys
@@ -13,9 +14,8 @@ from src.llm.agents.configuration_agent import ConfigurationAgent
 from src.llm.agents.langchain_dm_assistant import LangChainDMAssistant
 from src.llm.agents.queue_worker import initialize_queue_worker
 from src.db.setup_db import get_db
-from src.llm.agents.conversation_queue import get_conversation_queue
 from src.db.conversation_db import get_conversation_db
-from src.exceptions.message_processing import LLMProcessingError
+from src.llm.agents.conversation_queue import get_conversation_queue
 
 
 @dataclass
@@ -79,7 +79,7 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
             )
         else:
             logger.error("❌ LangChain DMAssistant model health check failed")
-            raise LLMProcessingError(
+            raise RuntimeError(
                 "LangChain DMAssistant model not available or not responsive"
             )
 
@@ -90,6 +90,7 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
 
         # Initialize queue worker with LangChain
         logger.info("⚡ Starting LangChain conversation queue worker...")
+
         queue_worker = initialize_queue_worker(use_langchain=True)
         await queue_worker.start()
         bot.queue_worker = queue_worker  # Store reference for cleanup
@@ -282,6 +283,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         Returns:
             List of ServerOption objects with indexing information
         """
+        from datetime import datetime
 
         mutual_servers = []
 
@@ -371,6 +373,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
             return
 
         # Import systems
+
         queue = get_conversation_queue()
         user_id = str(ctx.author.id)
 
@@ -395,16 +398,31 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
                 )
                 return
 
-        # Find mutual servers with indexed data (regardless of configuration status)
+        # Find mutual servers that are both indexed AND configured
         mutual_servers = await _get_mutual_servers_with_data(bot, ctx.author.id)
 
-        if not mutual_servers:
-            await ctx.send(
-                "❌ **No Indexed Servers**: We don't share any servers with indexed messages. I need to be in servers with you to search their message history."
-            )
+        # Filter to only include configured servers
+
+        configured_servers = []
+        for server in mutual_servers:
+            if ConfigurationAgent.is_server_configured(server.server_id):
+                configured_servers.append(server)
+
+        if not configured_servers:
+            if mutual_servers:
+                await ctx.send(
+                    "❌ **No Configured Servers**: The servers we share have messages but haven't been configured yet. Please ask the server admin to run the bot setup."
+                )
+            else:
+                await ctx.send(
+                    "❌ **No Indexed Servers**: We don't share any servers with indexed messages. I need to be in servers with you to search their message history."
+                )
             return
 
-        # If server specified, find and validate it
+        # Use configured servers for the rest of the logic
+        mutual_servers = configured_servers
+
+        # If server specified, find and use it
         selected_server = None
         if server_selection:
             # Try to find by number first
@@ -425,18 +443,13 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
                 )
                 return
 
-            # Check if the selected server is configured
-            if not ConfigurationAgent.is_server_configured(selected_server.server_id):
-                await ctx.send(
-                    f"❌ **Server Not Configured**: '{selected_server.server_name}' hasn't been configured yet. Please ask the server admin to run the bot setup."
-                )
-                return
+        # If only one server or server specified, go directly to queue
+        if len(mutual_servers) == 1 or selected_server:
+            server = selected_server or mutual_servers[0]
 
-        # If server was specified and validated, proceed with the query
-        if selected_server:
             success = await queue.add_request(
                 user_id=user_id,
-                server_id=selected_server.server_id,
+                server_id=server.server_id,
                 message=actual_message,
                 discord_message_id=ctx.message.id,
                 discord_channel=ctx.channel,
@@ -444,7 +457,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
 
             if success:
                 position = queue.get_queue_position(user_id)
-                server_name = selected_server.server_name
+                server_name = server.server_name
                 if position == 1:
                     status_msg = await ctx.send(
                         f"⏳ **Queued**: Searching **{server_name}** - processing soon..."
@@ -463,33 +476,23 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
                 )
             return
 
-        # No server specified - always show selection interface
-        if len(mutual_servers) == 1:
-            selection_text = "🔍 **Server Selection**: Which server should I search?\n\n"
-        else:
-            selection_text = "🔍 **Server Selection**: I found your question, but we're in multiple servers. Which server should I search?\n\n"
+        # Multiple servers - send selection message with instructions
+        selection_text = "🔍 **Server Selection**: I found your question, but we're in multiple servers. Which server should I search?\n\n"
 
-        # Import ConfigurationAgent for status checking
         for i, server in enumerate(mutual_servers, 1):
             last_indexed = (
                 server.last_indexed.strftime("%Y-%m-%d")
                 if server.last_indexed
                 else "Never"
             )
-
-            # Check configuration status
-            is_configured = ConfigurationAgent.is_server_configured(server.server_id)
-            config_status = "✅ Configured" if is_configured else "❌ Not Configured"
-
-            selection_text += f"**{i}. {server.server_name}** ({config_status})\n"
+            selection_text += f"**{i}. {server.server_name}**\n"
             selection_text += f"   📊 {server.message_count:,} messages | 📅 Last indexed: {last_indexed}\n\n"
 
         selection_text += "**To proceed**, use `!ask` again but specify the server:\n"
         selection_text += (
             f"Example: `!ask [{mutual_servers[0].server_name}] {actual_message}`\n\n"
         )
-        selection_text += "Or use server number: `!ask [1] {actual_message}`\n\n"
-        selection_text += "⚠️ **Note**: Only configured servers can be searched. Ask the server admin to run bot setup for unconfigured servers."
+        selection_text += "Or use server number: `!ask [1] {actual_message}`"
 
         await ctx.send(selection_text)
 
@@ -572,6 +575,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         pipeline_status = "✅ Active" if bot.message_pipeline else "❌ Inactive"
 
         # Get queue statistics (session manager removed in Phase 1)
+
         queue = get_conversation_queue()
         queue_stats = queue.get_stats()
 
