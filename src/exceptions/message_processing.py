@@ -36,3 +36,51 @@ class LLMProcessingError(Exception):
     def __init__(self, message: str = "LLM processing failed"):
         super().__init__(message)
         logger.warning(f"LLM processing failed: {message}")
+
+
+class CleanupError(Exception):
+    """
+    Base exception for cleanup operation failures.
+
+    This exception is raised when cleanup operations encounter errors
+    that prevent proper resource cleanup during bot shutdown.
+    """
+    def __init__(self, message: str = "Cleanup operation failed"):
+        super().__init__(message)
+        logger.warning(f"Cleanup operation failed: {message}")
+
+
+class DiscordCleanupError(CleanupError):
+    """
+    This exception is raised when Discord resource cleanup fails
+    due to voice channel cleanup, connection errors, or permission issues.
+
+    Triggering this exception logs the error but allows other cleanup operations to continue.
+    """
+    def __init__(self, message: str = "Discord cleanup failed"):
+        super().__init__(message)
+        logger.warning(f"Discord cleanup failed: {message}")
+
+
+class LLMCleanupError(CleanupError):
+    """
+    This exception is raised when LLM resource cleanup fails
+    due to Ollama connection errors or model unloading failures.
+
+    Triggering this exception logs the error but allows other cleanup operations to continue.
+    """
+    def __init__(self, message: str = "LLM cleanup failed"):
+        super().__init__(message)
+        logger.warning(f"LLM cleanup failed: {message}")
+
+
+class DatabaseCleanupError(CleanupError):
+    """
+    This exception is raised when database cleanup fails
+    due to ChromaDB or SQLite connection errors.
+
+    Triggering this exception logs the error but allows other cleanup operations to continue.
+    """
+    def __init__(self, message: str = "Database cleanup failed"):
+        super().__init__(message)
+        logger.warning(f"Database cleanup failed: {message}")

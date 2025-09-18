@@ -9,6 +9,7 @@ from src.bot.client import DiscordBot
 from src.bot.actions import setup_bot_actions
 from src.db import initialize_db
 from src.llm.agents.configuration_agent import get_configuration_agent
+from src.cleanup import Cleanup
 from chromadb.errors import ChromaError
 
 
@@ -16,13 +17,15 @@ async def main() -> None:
     """Main execution flow - orchestrates the Discord bot.
 
     Sets up logging, creates bot instance, configures event handlers,
-    and starts the Discord connection with proper error handling.
+    and starts the Discord connection with proper error handling and cleanup.
     """
     logger = logging.getLogger(__name__)
+    cleanup_manager = None
+    bot = None
 
     # Setup logging with file output
     log_level = logging.INFO if settings.DEBUG else logging.WARNING
-    
+
     # Create logs directory if it doesn't exist
     logs_dir = os.path.join(os.path.dirname(__file__), "logs")
     os.makedirs(logs_dir, exist_ok=True)
@@ -30,7 +33,7 @@ async def main() -> None:
     # Configure logging with file and console output
     log_filename = f"discord-indexer-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
     log_filepath = os.path.join(logs_dir, log_filename)
-    
+
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -39,9 +42,8 @@ async def main() -> None:
             logging.StreamHandler()  # Also log to console
         ]
     )
-    
-    logger.info(f"Logging to file: {log_filepath}")
 
+    logger.info(f"Logging to file: {log_filepath}")
     logger.info("🚀 Starting Discord Indexer Bot...")
 
     try:
@@ -83,6 +85,10 @@ async def main() -> None:
         logger.info("🤖 Creating bot instance...")
         bot = DiscordBot()
 
+        # Initialize cleanup manager with bot reference
+        cleanup_manager = Cleanup(bot)
+        logger.info("🧹 Cleanup manager initialized")
+
         # Setup actions and event handlers
         logger.info("⚙️ Setting up event handlers...")
         setup_bot_actions(bot)
@@ -93,10 +99,30 @@ async def main() -> None:
 
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped by user")
-    except (discord.LoginFailure, discord.HTTPException, discord.ConnectionClosed, 
+    except (discord.LoginFailure, discord.HTTPException, discord.ConnectionClosed,
             ValueError, OSError, RuntimeError, ChromaError) as e:
         logger.error(f"Failed to start bot: {e}")
         raise
+    finally:
+        # Always run cleanup, regardless of how the bot stopped
+        if cleanup_manager and bot:
+            logger.info("🧹 Initiating bot cleanup...")
+            try:
+                await cleanup_manager.cleanup_all()
+            except Exception as cleanup_error:
+                logger.error(f"Error during cleanup: {cleanup_error}")
+                # Log error but don't raise - we're shutting down anyway
+        elif bot and not cleanup_manager:
+            # Fallback cleanup if cleanup_manager wasn't created
+            logger.info("🧹 Performing fallback bot cleanup...")
+            try:
+                if not bot.is_closed():
+                    await bot.close()
+                    logger.info("Bot connection closed during fallback cleanup")
+            except Exception as fallback_error:
+                logger.error(f"Error during fallback cleanup: {fallback_error}")
+
+        logger.info("🔚 Bot shutdown sequence completed")
 
 
 if __name__ == "__main__":
