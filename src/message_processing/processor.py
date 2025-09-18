@@ -15,6 +15,7 @@ from src.message_processing.extraction import process_message_extractions
 from src.message_processing.metadata import process_message_metadata
 from src.message_processing.storage import store_complete_message
 from src.exceptions.message_processing import MessageProcessingError
+from src.llm.agents.configuration_agent import ConfigurationAgent
 
 
 logger = logging.getLogger(__name__)
@@ -201,10 +202,24 @@ class MessagePipeline:
                         logger.error(f"Failed to store message {message_id} from server {server_id}")
                         continue
                 
-                except MessageProcessingError:
-                    logger.warning(f"Message failed to process, skipping message {message_id}")
+                except MessageProcessingError as e:
                     self.messages_failed += 1
-                    continue
+
+                    # Get error handling strategy from configuration
+                    error_handling = ConfigurationAgent.get_global_setting(
+                        str(server_id),
+                        'message_processing_error_handling',
+                        'skip'  # Default to skip if not configured
+                    )
+
+                    if error_handling == 'stop':
+                        logger.error(f"Message processing failed for message {message_id}: {e}")
+                        logger.error(f"Error handling strategy is 'stop' - stopping all processing for server {server_id}")
+                        raise MessageProcessingError(f"Message processing stopped due to configuration: {e}")
+                    else:
+                        logger.warning(f"Message processing failed for message {message_id}: {e}")
+                        logger.warning(f"Error handling strategy is 'skip' - continuing with next message")
+                        continue
             
             logger.info(f"Server {server_id} processing completed successfully. Processed {len(sorted_messages)} messages")
         

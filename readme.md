@@ -48,21 +48,76 @@ The project follows a 10-week sprint plan focusing on:
 
 This project is in active development. Core functionality targets include reliable indexing of 50+ messages, sub-5-second query response times, and stable operation on consumer hardware.
 
-## Installation
+## Installation & Setup
 
-# Setup Instructions
+### Prerequisites
 
 1. Download & Install Ollama --> (https://ollama.com/download/windows)
 
 2. Open up a terminal and run this command:
 
-    ```ollama pull llama3.1:8b```
+    ```bash
+    ollama pull llama3.1:8b
+    ```
 
-3. In your terminal run ```pip install -r requirements.txt``` from the root directory.
+3. Install Python dependencies from the root directory:
 
-4. In the same terminal run: ```python main.py```
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-5. Enjoy
+### ⚠️ Important for Existing Developers
+
+**If you have previously run the bot, you MUST delete your existing database before proceeding:**
+
+```bash
+# Delete the entire databases directory
+rm -rf src/db/databases
+# Or on Windows:
+rmdir /s src\db\databases
+```
+
+This is required due to configuration system changes in the current development phase.
+
+### Setup Instructions
+
+1. **Configure your Discord bot** by running the setup script:
+
+    ```bash
+    python setup_bot.py
+    ```
+
+    This will guide you through:
+    - Entering your Discord server ID and name
+    - Configuring message processing error handling
+    - Setting up per-server configuration
+
+2. **Start the bot**:
+
+    ```bash
+    python main.py
+    ```
+
+    The bot will now only process messages from configured servers.
+
+### Configuration Management
+
+After initial setup, you can modify bot settings using:
+
+```bash
+# Modify settings for a specific server
+python change_settings.py [server_id]
+
+# Or run without server_id to select from available servers
+python change_settings.py
+```
+
+### Development Notes
+
+- The bot requires server configuration before it will start
+- Only configured servers will have their messages indexed
+- Each Discord server maintains separate configuration and database storage
+- Configuration is stored persistently in ChromaDB
 
 ## Usage
 

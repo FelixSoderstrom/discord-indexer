@@ -6,6 +6,7 @@ import logging
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from src.bot.rate_limiter import DiscordRateLimiter
 from src.message_processing.storage import get_server_indexing_status
+from src.llm.agents.configuration_agent import ConfigurationAgent
 
 if TYPE_CHECKING:
     from src.message_processing import MessagePipeline
@@ -227,7 +228,12 @@ class DiscordBot(commands.Bot):
             # Process each server separately with resumption logic
             for guild_id, guild_channels in channels_by_guild.items():
                 self.logger.info(f"Checking resumption status for server {guild_id}")
-                
+
+                # Check if server is configured before processing any messages
+                if not ConfigurationAgent.is_server_configured(str(guild_id)):
+                    self.logger.info(f"Skipping historical processing for unconfigured server {guild_id}")
+                    continue
+
                 # Get resumption info for this server
                 server_status = get_server_indexing_status(guild_id)
                 
@@ -339,7 +345,7 @@ class DiscordBot(commands.Bot):
 
     async def get_all_historical_messages(self) -> List[Dict[str, Any]]:
         """Legacy method for fetching all historical messages without pipeline processing.
-        
+
         DEPRECATED: Use process_historical_messages_through_pipeline() instead.
         This method bypasses the pipeline and is only kept for compatibility.
 
@@ -347,16 +353,29 @@ class DiscordBot(commands.Bot):
             List of all extracted message data from accessible channels
         """
         self.logger.warning("Using deprecated get_all_historical_messages - messages will bypass pipeline")
-        
-        channels = self.get_all_channels()
+
+        # Filter channels to only include those from configured servers
+        all_channels = self.get_all_channels()
+        configured_channels = []
+
+        for channel in all_channels:
+            server_id = str(channel.guild.id)
+            if ConfigurationAgent.is_server_configured(server_id):
+                configured_channels.append(channel)
+            else:
+                self.logger.info(f"Skipping channel {channel.name} from unconfigured server {channel.guild.name}")
 
         self.logger.info(
-            f"Processing {len(channels)} channels for historical messages with parallel rate-limited fetching..."
+            f"Processing {len(configured_channels)} channels from configured servers (filtered from {len(all_channels)} total channels)..."
         )
+
+        if not configured_channels:
+            self.logger.info("No channels from configured servers to process")
+            return []
 
         # Use rate limiter for parallel batch fetching
         raw_messages = await self.rate_limiter.batch_fetch_messages(
-            channels=channels,
+            channels=configured_channels,
             messages_per_channel=1000,
             max_concurrent_channels=5,  # Fetch from 5 channels simultaneously
         )
@@ -365,10 +384,10 @@ class DiscordBot(commands.Bot):
         all_messages = [self._extract_message_data(msg) for msg in raw_messages]
 
         # Update processed channels list
-        for channel in channels:
+        for channel in configured_channels:
             self.processed_channels.append(channel.id)
 
-        self.logger.info(f"Total messages fetched: {len(all_messages)}")
+        self.logger.info(f"Total messages fetched from configured servers: {len(all_messages)}")
         self.stored_messages.extend(all_messages)
         return all_messages
 
