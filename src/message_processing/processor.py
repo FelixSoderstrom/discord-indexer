@@ -14,7 +14,7 @@ from src.message_processing.embedding import process_message_embeddings
 from src.message_processing.extraction import process_message_extractions
 from src.message_processing.metadata import process_message_metadata
 from src.message_processing.storage import store_complete_message
-from src.exceptions.message_processing import MessageProcessingError
+from src.exceptions.message_processing import MessageProcessingError, DatabaseConnectionError, LLMProcessingError
 from src.llm.agents.configuration_agent import ConfigurationAgent
 
 
@@ -193,7 +193,7 @@ class MessagePipeline:
                     # Store processed data to database using server-specific client
                     logger.info("Storing processed message to database")
                     storage_success = store_complete_message(processed_data)
-                    
+
                     if storage_success:
                         self.messages_processed += 1
                         logger.debug(f"Message {message_id} processed successfully. Total processed: {self.messages_processed}")
@@ -201,7 +201,45 @@ class MessagePipeline:
                         self.messages_failed += 1
                         logger.error(f"Failed to store message {message_id} from server {server_id}")
                         continue
-                
+
+                except DatabaseConnectionError as e:
+                    self.messages_failed += 1
+
+                    # Get error handling strategy from configuration
+                    error_handling = ConfigurationAgent.get_global_setting(
+                        str(server_id),
+                        'database_error_handling',
+                        'skip'  # Default to skip if not configured
+                    )
+
+                    if error_handling == 'stop':
+                        logger.error(f"Database operation failed for message {message_id}: {e}")
+                        logger.error(f"Error handling strategy is 'stop' - stopping all processing for server {server_id}")
+                        raise DatabaseConnectionError(f"Database processing stopped due to configuration: {e}")
+                    else:
+                        logger.warning(f"Database operation failed for message {message_id}: {e}")
+                        logger.warning(f"Error handling strategy is 'skip' - continuing with next message")
+                        continue
+
+                except LLMProcessingError as e:
+                    self.messages_failed += 1
+
+                    # Get error handling strategy from configuration
+                    error_handling = ConfigurationAgent.get_global_setting(
+                        str(server_id),
+                        'llm_error_handling',
+                        'skip'  # Default to skip if not configured
+                    )
+
+                    if error_handling == 'stop':
+                        logger.error(f"LLM processing failed for message {message_id}: {e}")
+                        logger.error(f"Error handling strategy is 'stop' - stopping all processing for server {server_id}")
+                        raise LLMProcessingError(f"LLM processing stopped due to configuration: {e}")
+                    else:
+                        logger.warning(f"LLM processing failed for message {message_id}: {e}")
+                        logger.warning(f"Error handling strategy is 'skip' - continuing with next message")
+                        continue
+
                 except MessageProcessingError as e:
                     self.messages_failed += 1
 

@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional
 import re
 
 from src.message_processing.scraper import get_content
-from src.exceptions.message_processing import MessageProcessingError
+from src.exceptions.message_processing import MessageProcessingError, LLMProcessingError
 from src.llm.agents.link_analyzer import LinkAnalyzer
 
 
@@ -68,9 +68,13 @@ async def analyze_link_content(url: str) -> Optional[str]:
         logger.warning(f"Failed to scrape content from {url}: {e}")
         raise MessageProcessingError(f"Failed to scrape URL {url}: {e}")
     
-    summary = await link_analyzer.extract_relevant_content(content)
-    logger.info(f"Successfully extracted summary from {url} ({len(summary)} characters)")
-    return summary
+    try:
+        summary = await link_analyzer.extract_relevant_content(content)
+        logger.info(f"Successfully extracted summary from {url} ({len(summary)} characters)")
+        return summary
+    except LLMProcessingError as e:
+        logger.warning(f"Failed to extract content from {url} using LLM: {e}")
+        raise LLMProcessingError(f"Failed to extract content from URL {url}: {e}")
         
 
 
@@ -121,6 +125,9 @@ async def process_message_extractions(message_data: Dict[str, Any]) -> Dict[str,
                     logger.info(f"Generated summary for {url}")
             except MessageProcessingError as e:
                 logger.warning(f"Skipping URL {url} due to processing error: {e}")
+                continue
+            except LLMProcessingError as e:
+                logger.warning(f"Skipping URL {url} due to LLM processing error: {e}")
                 continue
         
         # Combine all summaries with newlines for embedding

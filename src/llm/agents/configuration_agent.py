@@ -22,6 +22,7 @@ from chromadb.errors import ChromaError
 
 from src.llm.utils import ensure_model_available, health_check, get_ollama_client
 from src.db.setup_db import get_db
+from src.exceptions.message_processing import DatabaseConnectionError
 
 try:
     from src.config.settings import settings
@@ -145,6 +146,16 @@ class ConfigurationAgent:
                             category=option_data.get('category', 'general')
                         )
                         registry[option.key] = option
+
+                    # Merge with default options to ensure new options are available
+                    default_options = self._create_default_configuration_options()
+                    for key, option in default_options.items():
+                        if key not in registry:
+                            registry[key] = option
+
+                    # Save updated registry if we added new options
+                    if len(registry) > len(results['documents']):
+                        self._save_configuration_registry(registry)
                 else:
                     # Collection is empty, initialize with defaults
                     registry = self._create_default_configuration_options()
@@ -170,6 +181,26 @@ class ConfigurationAgent:
                 key='message_processing_error_handling',
                 display_name='Message Processing Error Handling',
                 description='What should the bot do when message processing fails?',
+                data_type='choice',
+                choices=['skip', 'stop'],
+                default_value='skip',
+                required=True,
+                category='setup'
+            ),
+            'database_error_handling': ConfigurationOption(
+                key='database_error_handling',
+                display_name='Database Error Handling',
+                description='What should the bot do when database operations fail?',
+                data_type='choice',
+                choices=['skip', 'stop'],
+                default_value='skip',
+                required=True,
+                category='setup'
+            ),
+            'llm_error_handling': ConfigurationOption(
+                key='llm_error_handling',
+                display_name='LLM Processing Error Handling',
+                description='What should the bot do when AI model processing fails?',
                 data_type='choice',
                 choices=['skip', 'stop'],
                 default_value='skip',
@@ -215,7 +246,7 @@ class ConfigurationAgent:
 
         except ChromaError as e:
             self.logger.error(f"Error saving configuration registry: {e}")
-            raise RuntimeError(f"Failed to save configuration registry: {e}")
+            raise DatabaseConnectionError(f"Failed to save configuration registry: {e}")
 
     def _load_configurations_to_memory(self) -> None:
         """Load all server configurations into global memory dictionary."""

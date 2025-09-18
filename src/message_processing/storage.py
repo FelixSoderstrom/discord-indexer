@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional
 
 from src.db import get_db
 from chromadb.errors import ChromaError, NotFoundError
+from src.exceptions.message_processing import DatabaseConnectionError
 
 
 logger = logging.getLogger(__name__)
@@ -106,7 +107,7 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
         
     except (ChromaError, ValueError, TypeError, ConnectionError, OSError, MemoryError) as e:
         logger.error(f"Failed to store message {message_id}: {e}")
-        return False
+        raise DatabaseConnectionError(f"Failed to store message {message_id}: {e}")
 
 
 def get_server_indexing_status(server_id: int) -> Dict[str, Any]:

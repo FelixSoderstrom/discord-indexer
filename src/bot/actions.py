@@ -15,6 +15,7 @@ from src.llm.agents.queue_worker import initialize_queue_worker
 from src.db.setup_db import get_db
 from src.llm.agents.conversation_queue import get_conversation_queue
 from src.db.conversation_db import get_conversation_db
+from src.exceptions.message_processing import LLMProcessingError
 
 
 @dataclass
@@ -78,7 +79,7 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
             )
         else:
             logger.error("❌ LangChain DMAssistant model health check failed")
-            raise RuntimeError(
+            raise LLMProcessingError(
                 "LangChain DMAssistant model not available or not responsive"
             )
 

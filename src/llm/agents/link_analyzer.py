@@ -5,6 +5,7 @@ from typing import Dict, Optional
 from src.llm.chat_completion import generate_completion_with_messages_async, LLMResponse
 from src.llm.utils import ensure_model_available, health_check
 from src.config.settings import settings
+from src.exceptions.message_processing import LLMProcessingError
 
 
 class LinkAnalyzer:
@@ -70,7 +71,7 @@ class LinkAnalyzer:
         try:
             # Validate input
             if not cleaned_html or not cleaned_html.strip():
-                raise ValueError("Empty or whitespace-only HTML content provided")
+                raise LLMProcessingError("Empty or whitespace-only HTML content provided")
             
             # Build messages for LLM
             messages = [
@@ -88,13 +89,13 @@ class LinkAnalyzer:
             
             if not llm_response.success:
                 self.logger.error(f"LLM generation failed: {llm_response.error}")
-                raise RuntimeError(f"Content extraction failed: {llm_response.error}")
-            
+                raise LLMProcessingError(f"Content extraction failed: {llm_response.error}")
+
             extracted_content = llm_response.content.strip()
-            
+
             # Validate that we got some content
             if not extracted_content:
-                raise RuntimeError("LLM returned empty content")
+                raise LLMProcessingError("LLM returned empty content")
             
             # Log the extraction
             self.logger.info(

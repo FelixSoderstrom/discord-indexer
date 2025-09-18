@@ -38,7 +38,7 @@ def _clean_page(html_content: str, url: str) -> str:
         extracted_content = trafilatura.extract(html_content, url=url)
         if not extracted_content:
             logger.error(f"Failed to extract content from HTML for URL: {url}")
-            raise RuntimeError(f"Failed to extract content from HTML for URL: {url}")
+            raise MessageProcessingError(f"Failed to extract content from HTML for URL: {url}")
         
         cleaned_content = extracted_content.strip()
         cleaned_content = re.sub(r'\n\s*\n', '\n\n', cleaned_content)
