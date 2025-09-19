@@ -70,10 +70,12 @@ class LangChainDMAssistant:
             else int(os.getenv("LLM_MAX_RESPONSE", "1800"))
         )
         self.max_context_messages = (
-            max_context_messages 
-            if max_context_messages is not None 
+            max_context_messages
+            if max_context_messages is not None
             else int(os.getenv("LLM_MAX_CONTEXT_MESSAGES", "20"))
         )
+        self.max_agent_iterations = int(os.getenv("LLM_MAX_AGENT_ITERATIONS", "10"))
+        self.max_execution_time = int(os.getenv("LLM_MAX_EXECUTION_TIME", "30"))
         
         self.logger = logging.getLogger(__name__)
         
@@ -144,8 +146,8 @@ class LangChainDMAssistant:
                 agent=user_server_agent,
                 tools=server_tools,
                 verbose=True,
-                max_iterations=3,
-                max_execution_time=30,  # 30 second timeout
+                max_iterations=self.max_agent_iterations,
+                max_execution_time=self.max_execution_time,
                 handle_parsing_errors=True
             )
             
