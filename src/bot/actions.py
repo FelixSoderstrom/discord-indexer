@@ -10,7 +10,7 @@ from typing import List, Optional
 from datetime import datetime
 from dataclasses import dataclass
 from src.message_processing import MessagePipeline
-from src.llm.agents.configuration_agent import ConfigurationAgent
+from src.setup.configuration_manager import ConfigurationManager
 from src.llm.agents.langchain_dm_assistant import LangChainDMAssistant
 from src.llm.agents.queue_worker import initialize_queue_worker
 from src.db.setup_db import get_db
@@ -213,7 +213,7 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
     # Check if server is configured before indexing messages
     server_id = str(message.guild.id)
 
-    if not ConfigurationAgent.is_server_configured(server_id):
+    if not ConfigurationManager.is_server_configured(server_id):
         logger.debug(
             f"Skipping message indexing for unconfigured server {message.guild.name} ({server_id})"
         )
@@ -405,7 +405,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
 
         configured_servers = []
         for server in mutual_servers:
-            if ConfigurationAgent.is_server_configured(server.server_id):
+            if ConfigurationManager.is_server_configured(server.server_id):
                 configured_servers.append(server)
 
         if not configured_servers:

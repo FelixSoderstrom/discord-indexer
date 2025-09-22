@@ -15,7 +15,7 @@ from src.message_processing.extraction import process_message_extractions
 from src.message_processing.metadata import process_message_metadata
 from src.message_processing.storage import store_complete_message
 from src.exceptions.message_processing import MessageProcessingError, DatabaseConnectionError, LLMProcessingError
-from src.llm.agents.configuration_agent import ConfigurationAgent
+from src.setup.configuration_manager import ConfigurationManager
 
 
 logger = logging.getLogger(__name__)
@@ -206,7 +206,7 @@ class MessagePipeline:
                     self.messages_failed += 1
 
                     # Get error handling strategy from configuration
-                    error_handling = ConfigurationAgent.get_global_setting(
+                    error_handling = ConfigurationManager.get_global_setting(
                         str(server_id),
                         'database_error_handling',
                         'skip'  # Default to skip if not configured
@@ -225,7 +225,7 @@ class MessagePipeline:
                     self.messages_failed += 1
 
                     # Get error handling strategy from configuration
-                    error_handling = ConfigurationAgent.get_global_setting(
+                    error_handling = ConfigurationManager.get_global_setting(
                         str(server_id),
                         'llm_error_handling',
                         'skip'  # Default to skip if not configured
@@ -244,7 +244,7 @@ class MessagePipeline:
                     self.messages_failed += 1
 
                     # Get error handling strategy from configuration
-                    error_handling = ConfigurationAgent.get_global_setting(
+                    error_handling = ConfigurationManager.get_global_setting(
                         str(server_id),
                         'message_processing_error_handling',
                         'skip'  # Default to skip if not configured

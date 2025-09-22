@@ -6,7 +6,7 @@ import logging
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from src.bot.rate_limiter import DiscordRateLimiter
 from src.message_processing.storage import get_server_indexing_status
-from src.llm.agents.configuration_agent import ConfigurationAgent
+from src.setup.configuration_manager import ConfigurationManager
 
 if TYPE_CHECKING:
     from src.message_processing import MessagePipeline
@@ -230,7 +230,7 @@ class DiscordBot(commands.Bot):
                 self.logger.info(f"Checking resumption status for server {guild_id}")
 
                 # Check if server is configured before processing any messages
-                if not ConfigurationAgent.is_server_configured(str(guild_id)):
+                if not ConfigurationManager.is_server_configured(str(guild_id)):
                     self.logger.info(f"Skipping historical processing for unconfigured server {guild_id}")
                     continue
 
@@ -360,7 +360,7 @@ class DiscordBot(commands.Bot):
 
         for channel in all_channels:
             server_id = str(channel.guild.id)
-            if ConfigurationAgent.is_server_configured(server_id):
+            if ConfigurationManager.is_server_configured(server_id):
                 configured_channels.append(channel)
             else:
                 self.logger.info(f"Skipping channel {channel.name} from unconfigured server {channel.guild.name}")

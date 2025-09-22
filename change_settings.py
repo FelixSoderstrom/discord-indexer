@@ -19,7 +19,7 @@ from typing import Optional, Dict, Any
 # Add src to path for imports
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from src.llm.agents.configuration_agent import ConfigurationAgent, get_configuration_agent, ConfigurationOption
+from src.setup.configuration_manager import ConfigurationManager, get_configuration_manager, ConfigurationOption
 from src.db.setup_db import initialize_db
 
 
@@ -45,11 +45,11 @@ def print_banner():
     print("=" * 70)
 
 
-def select_server(agent: ConfigurationAgent, provided_server_id: Optional[str] = None) -> Optional[str]:
+def select_server(agent: ConfigurationManager, provided_server_id: Optional[str] = None) -> Optional[str]:
     """Select a server to configure."""
     if provided_server_id:
         # Validate provided server ID
-        config = agent.get_server_configuration(provided_server_id)
+        config = manager.get_server_configuration(provided_server_id)
         if config:
             print(f"📋 Selected server: {config.server_name} ({provided_server_id})")
             return provided_server_id
@@ -58,12 +58,12 @@ def select_server(agent: ConfigurationAgent, provided_server_id: Optional[str] =
             print("Available servers:")
 
     # Show available servers
-    stats = agent.get_stats()
+    stats = manager.get_stats()
     if stats["total_servers"] == 0:
         print("❌ No servers configured. Run 'python setup_bot.py' first.")
         return None
 
-    return agent._interactive_server_selection()
+    return manager._interactive_server_selection()
 
 
 def show_main_menu():
@@ -82,9 +82,9 @@ def show_main_menu():
     print("0. Exit")
 
 
-def view_configuration(agent: ConfigurationAgent, server_id: str):
+def view_configuration(agent: ConfigurationManager, server_id: str):
     """Display current server configuration."""
-    config = agent.get_server_configuration(server_id)
+    config = manager.get_server_configuration(server_id)
     if not config:
         print("❌ Unable to retrieve configuration")
         return
@@ -93,10 +93,10 @@ def view_configuration(agent: ConfigurationAgent, server_id: str):
     print("=" * 60)
 
     # Group by category
-    categories = agent.get_configuration_categories()
+    categories = manager.get_configuration_categories()
 
     for category in categories:
-        options = agent.get_configuration_options_by_category(category)
+        options = manager.get_configuration_options_by_category(category)
         print(f"\n📁 {category.upper()}")
         print("-" * 40)
 
@@ -120,9 +120,9 @@ def view_configuration(agent: ConfigurationAgent, server_id: str):
     print(f"   Updated: {config.updated_at.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
-def modify_individual_settings(agent: ConfigurationAgent, server_id: str):
+def modify_individual_settings(agent: ConfigurationManager, server_id: str):
     """Modify individual configuration settings."""
-    config = agent.get_server_configuration(server_id)
+    config = manager.get_server_configuration(server_id)
     if not config:
         print("❌ Unable to retrieve configuration")
         return
@@ -131,7 +131,7 @@ def modify_individual_settings(agent: ConfigurationAgent, server_id: str):
     print("=" * 50)
 
     # Show all options with current values
-    all_options = agent._configuration_registry
+    all_options = manager._configuration_registry
     options_list = list(all_options.items())
 
     print("Available settings:")
@@ -152,7 +152,7 @@ def modify_individual_settings(agent: ConfigurationAgent, server_id: str):
                 _modify_single_option(agent, server_id, option_key, option, config)
 
                 # Refresh config after modification
-                config = agent.get_server_configuration(server_id)
+                config = manager.get_server_configuration(server_id)
                 if not config:
                     print("❌ Unable to refresh configuration")
                     return
@@ -163,9 +163,9 @@ def modify_individual_settings(agent: ConfigurationAgent, server_id: str):
             print("❌ Please enter a number or 'q'")
 
 
-def modify_category_settings(agent: ConfigurationAgent, server_id: str):
+def modify_category_settings(agent: ConfigurationManager, server_id: str):
     """Modify settings by category."""
-    config = agent.get_server_configuration(server_id)
+    config = manager.get_server_configuration(server_id)
     if not config:
         print("❌ Unable to retrieve configuration")
         return
@@ -173,10 +173,10 @@ def modify_category_settings(agent: ConfigurationAgent, server_id: str):
     print(f"\n📂 MODIFY BY CATEGORY: {config.server_name}")
     print("=" * 50)
 
-    categories = agent.get_configuration_categories()
+    categories = manager.get_configuration_categories()
     print("Available categories:")
     for i, category in enumerate(categories, 1):
-        options_in_category = agent.get_configuration_options_by_category(category)
+        options_in_category = manager.get_configuration_options_by_category(category)
         configured_count = sum(1 for key in options_in_category.keys() if key in config.configuration_options)
         print(f"  {i}. {category.title()} ({configured_count}/{len(options_in_category)} configured)")
 
@@ -192,7 +192,7 @@ def modify_category_settings(agent: ConfigurationAgent, server_id: str):
                 _modify_category_options(agent, server_id, category, config)
 
                 # Refresh config after modification
-                config = agent.get_server_configuration(server_id)
+                config = manager.get_server_configuration(server_id)
                 if not config:
                     print("❌ Unable to refresh configuration")
                     return
@@ -203,7 +203,7 @@ def modify_category_settings(agent: ConfigurationAgent, server_id: str):
             print("❌ Please enter a number or 'q'")
 
 
-def _modify_single_option(agent: ConfigurationAgent, server_id: str, option_key: str, option: ConfigurationOption, config):
+def _modify_single_option(agent: ConfigurationManager, server_id: str, option_key: str, option: ConfigurationOption, config):
     """Modify a single configuration option."""
     current_value = config.configuration_options.get(option_key, "Not set")
 
@@ -233,12 +233,12 @@ def _modify_single_option(agent: ConfigurationAgent, server_id: str, option_key:
             continue
 
         # Convert and validate input
-        converted_value = agent._convert_user_input(option, user_input)
+        converted_value = manager._convert_user_input(option, user_input)
         if converted_value is None:
             print(f"❌ Invalid value for {option.data_type}. Please try again.")
             continue
 
-        if not agent._validate_configuration_value(option, converted_value):
+        if not manager._validate_configuration_value(option, converted_value):
             print("❌ Value failed validation. Please check format and try again.")
             if option.validation_pattern:
                 print(f"   Expected pattern: {option.validation_pattern}")
@@ -248,16 +248,16 @@ def _modify_single_option(agent: ConfigurationAgent, server_id: str, option_key:
 
         # Apply the change
         updates = {option_key: converted_value}
-        if agent.update_server_configuration(server_id, updates, "manual_change"):
+        if manager.update_server_configuration(server_id, updates, "manual_change"):
             print(f"✅ Updated {option.display_name} = {converted_value}")
         else:
             print("❌ Failed to save changes")
         return
 
 
-def _modify_category_options(agent: ConfigurationAgent, server_id: str, category: str, config):
+def _modify_category_options(agent: ConfigurationManager, server_id: str, category: str, config):
     """Modify all options in a category."""
-    options = agent.get_configuration_options_by_category(category)
+    options = manager.get_configuration_options_by_category(category)
 
     print(f"\n📂 CATEGORY: {category.upper()}")
     print("=" * 50)
@@ -285,12 +285,12 @@ def _modify_category_options(agent: ConfigurationAgent, server_id: str, category
             continue
 
         # Convert and validate input
-        converted_value = agent._convert_user_input(option, user_input)
+        converted_value = manager._convert_user_input(option, user_input)
         if converted_value is None:
             print(f"   ❌ Invalid value for {option.data_type}. Keeping current value.")
             continue
 
-        if not agent._validate_configuration_value(option, converted_value):
+        if not manager._validate_configuration_value(option, converted_value):
             print("   ❌ Value failed validation. Keeping current value.")
             continue
 
@@ -300,7 +300,7 @@ def _modify_category_options(agent: ConfigurationAgent, server_id: str, category
     # Apply all updates for this category
     if updates:
         print(f"\n💾 Applying {len(updates)} changes...")
-        if agent.update_server_configuration(server_id, updates, "category_change"):
+        if manager.update_server_configuration(server_id, updates, "category_change"):
             print("✅ Category updates saved successfully!")
         else:
             print("❌ Failed to save category updates")
@@ -308,9 +308,9 @@ def _modify_category_options(agent: ConfigurationAgent, server_id: str, category
         print("No changes made to this category.")
 
 
-def export_configuration(agent: ConfigurationAgent, server_id: str):
+def export_configuration(agent: ConfigurationManager, server_id: str):
     """Export server configuration to a JSON file."""
-    config = agent.get_server_configuration(server_id)
+    config = manager.get_server_configuration(server_id)
     if not config:
         print("❌ Unable to retrieve configuration")
         return
@@ -342,9 +342,9 @@ def export_configuration(agent: ConfigurationAgent, server_id: str):
         print(f"❌ Failed to export configuration: {e}")
 
 
-def import_configuration(agent: ConfigurationAgent, server_id: str):
+def import_configuration(agent: ConfigurationManager, server_id: str):
     """Import server configuration from a JSON file."""
-    config = agent.get_server_configuration(server_id)
+    config = manager.get_server_configuration(server_id)
     if not config:
         print("❌ Unable to retrieve current configuration")
         return
@@ -377,7 +377,7 @@ def import_configuration(agent: ConfigurationAgent, server_id: str):
         # Show what will be changed
         changes = {}
         for key, value in imported_config.items():
-            if key in agent._configuration_registry:
+            if key in manager._configuration_registry:
                 current = config.configuration_options.get(key, "Not set")
                 if current != value:
                     changes[key] = {"old": current, "new": value}
@@ -385,7 +385,7 @@ def import_configuration(agent: ConfigurationAgent, server_id: str):
         if changes:
             print(f"Changes to be made: {len(changes)}")
             for key, change in changes.items():
-                option = agent._configuration_registry[key]
+                option = manager._configuration_registry[key]
                 print(f"  • {option.display_name}: {change['old']} → {change['new']}")
         else:
             print("No changes needed - all settings match current configuration")
@@ -399,15 +399,15 @@ def import_configuration(agent: ConfigurationAgent, server_id: str):
         # Apply import
         valid_updates = {}
         for key, value in imported_config.items():
-            if key in agent._configuration_registry:
-                option = agent._configuration_registry[key]
-                if agent._validate_configuration_value(option, value):
+            if key in manager._configuration_registry:
+                option = manager._configuration_registry[key]
+                if manager._validate_configuration_value(option, value):
                     valid_updates[key] = value
                 else:
                     print(f"⚠️ Skipping invalid value for {option.display_name}")
 
         if valid_updates:
-            if agent.update_server_configuration(server_id, valid_updates, "config_import"):
+            if manager.update_server_configuration(server_id, valid_updates, "config_import"):
                 print(f"✅ Successfully imported {len(valid_updates)} settings!")
             else:
                 print("❌ Failed to import configuration")
@@ -422,9 +422,9 @@ def import_configuration(agent: ConfigurationAgent, server_id: str):
         print(f"❌ Import failed: {e}")
 
 
-def reset_to_defaults(agent: ConfigurationAgent, server_id: str):
+def reset_to_defaults(agent: ConfigurationManager, server_id: str):
     """Reset server configuration to default values."""
-    config = agent.get_server_configuration(server_id)
+    config = manager.get_server_configuration(server_id)
     if not config:
         print("❌ Unable to retrieve configuration")
         return
@@ -441,12 +441,12 @@ def reset_to_defaults(agent: ConfigurationAgent, server_id: str):
 
     # Prepare default values
     default_updates = {}
-    for option in agent._configuration_registry.values():
+    for option in manager._configuration_registry.values():
         if option.default_value is not None:
             default_updates[option.key] = option.default_value
 
     if default_updates:
-        if agent.update_server_configuration(server_id, default_updates, "reset_defaults"):
+        if manager.update_server_configuration(server_id, default_updates, "reset_defaults"):
             print(f"✅ Successfully reset {len(default_updates)} settings to defaults!")
         else:
             print("❌ Failed to reset configuration")
@@ -454,14 +454,14 @@ def reset_to_defaults(agent: ConfigurationAgent, server_id: str):
         print("⚠️ No default values available to reset to")
 
 
-def show_server_statistics(agent: ConfigurationAgent, server_id: str):
+def show_server_statistics(agent: ConfigurationManager, server_id: str):
     """Display server configuration statistics."""
-    config = agent.get_server_configuration(server_id)
+    config = manager.get_server_configuration(server_id)
     if not config:
         print("❌ Unable to retrieve configuration")
         return
 
-    stats = agent.get_stats()
+    stats = manager.get_stats()
 
     print(f"\n📊 SERVER STATISTICS: {config.server_name}")
     print("=" * 60)
@@ -473,11 +473,11 @@ def show_server_statistics(agent: ConfigurationAgent, server_id: str):
     print(f"Configuration Completeness: {len(config.configuration_options)/stats['total_configuration_options']*100:.1f}%")
 
     # Category breakdown
-    categories = agent.get_configuration_categories()
+    categories = manager.get_configuration_categories()
     print(f"\n📂 CATEGORY BREAKDOWN")
     print("-" * 40)
     for category in categories:
-        options = agent.get_configuration_options_by_category(category)
+        options = manager.get_configuration_options_by_category(category)
         configured = sum(1 for key in options.keys() if key in config.configuration_options)
         percentage = configured / len(options) * 100 if options else 0
         print(f"  {category.title()}: {configured}/{len(options)} ({percentage:.1f}%)")
@@ -524,10 +524,10 @@ def main():
         print("🗄️ Initializing database...")
         initialize_db()
 
-        print("🤖 Initializing configuration agent...")
-        agent = get_configuration_agent()
+        print("🤖 Initializing configuration manager...")
+        manager = get_configuration_manager()
 
-        if not agent.health_check():
+        if not manager.health_check():
             print("❌ Configuration agent health check failed")
             sys.exit(1)
 

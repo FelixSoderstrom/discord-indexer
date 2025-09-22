@@ -17,7 +17,7 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from src.llm.agents.configuration_agent import ConfigurationAgent, get_configuration_agent
+from src.setup.configuration_manager import ConfigurationManager, get_configuration_manager
 from src.db.setup_db import initialize_db
 
 
@@ -84,18 +84,18 @@ def confirm_setup_start(server_name: str):
         print("❌ Please enter 'y' or 'n'")
 
 
-def run_simple_setup(agent: ConfigurationAgent, server_id: str, server_name: str):
+def run_simple_setup(agent: ConfigurationManager, server_id: str, server_name: str):
     """Run the simplified configuration setup."""
     print(f"\n🚀 Configuring {server_name}")
     print("=" * 50)
 
     # Start server setup
-    if not agent.start_server_setup(server_id, server_name):
+    if not manager.start_server_setup(server_id, server_name):
         print("❌ Failed to initialize server setup")
         return False
 
     # Get the single configuration option
-    option = agent._configuration_registry['message_processing_error_handling']
+    option = manager._configuration_registry['message_processing_error_handling']
 
     print(f"\n🔧 ESSENTIAL CONFIGURATION")
     print("-" * 40)
@@ -150,14 +150,14 @@ def run_simple_setup(agent: ConfigurationAgent, server_id: str, server_name: str
     print(f"\n💾 SAVING CONFIGURATION")
     print("=" * 40)
 
-    if agent.update_server_configuration(server_id, updates, "initial_setup"):
+    if manager.update_server_configuration(server_id, updates, "initial_setup"):
         print("✅ Configuration saved successfully!")
     else:
         print("❌ Failed to save configuration")
         return False
 
     # Complete setup
-    if agent.complete_server_setup(server_id):
+    if manager.complete_server_setup(server_id):
         print(f"\n🎉 SETUP COMPLETED!")
         print("=" * 40)
         print(f"Server: {server_name}")
@@ -211,9 +211,9 @@ def _display_detailed_help(option):
     print("=" * 50)
 
 
-def _display_setup_summary(agent: ConfigurationAgent, server_id: str):
+def _display_setup_summary(agent: ConfigurationManager, server_id: str):
     """Display setup completion summary."""
-    config = agent.get_server_configuration(server_id)
+    config = manager.get_server_configuration(server_id)
     if not config:
         print("❌ Unable to retrieve configuration summary")
         return
@@ -224,11 +224,11 @@ def _display_setup_summary(agent: ConfigurationAgent, server_id: str):
     print(f"Total Settings: {len(config.configuration_options)}")
 
     # Show configured options by category
-    categories = agent.get_configuration_categories()
+    categories = manager.get_configuration_categories()
     configured_count = 0
 
     for category in categories:
-        options = agent.get_configuration_options_by_category(category)
+        options = manager.get_configuration_options_by_category(category)
         category_configured = sum(1 for key in options.keys() if key in config.configuration_options)
         configured_count += category_configured
         print(f"  {category.title()}: {category_configured}/{len(options)} configured")
@@ -251,11 +251,11 @@ def main():
         initialize_db()
 
         # Initialize configuration agent
-        print("🤖 Initializing configuration agent...")
-        agent = get_configuration_agent()
+        print("🤖 Initializing configuration manager...")
+        manager = get_configuration_manager()
 
         # Health check
-        if not agent.health_check():
+        if not manager.health_check():
             print("❌ Configuration agent health check failed")
             sys.exit(1)
 
@@ -263,8 +263,8 @@ def main():
         server_id, server_name = get_server_info()
 
         # Check if server already configured
-        existing_config = agent.get_server_configuration(server_id)
-        if existing_config and agent.is_server_configured(server_id):
+        existing_config = manager.get_server_configuration(server_id)
+        if existing_config and manager.is_server_configured(server_id):
             print(f"\n⚠️ Server '{server_name}' is already configured!")
             print("Use 'python change_settings.py' to modify existing settings.")
 

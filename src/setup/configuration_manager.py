@@ -1,4 +1,4 @@
-"""Configuration Agent for Discord bot server setup and management.
+"""Configuration Manager for Discord bot server setup and management.
 
 This module provides comprehensive configuration management for Discord servers,
 including one-time setup processes, terminal-based configuration UI, persistent
@@ -70,9 +70,9 @@ class ServerConfiguration:
     setup_version: str = "1.0"
 
 
-class ConfigurationAgent:
+class ConfigurationManager:
     """
-    Discord bot server configuration management agent.
+    Discord bot server configuration management system.
 
     Handles one-time setup processes, terminal-based configuration UI,
     persistent storage per server, and global in-memory settings management.
@@ -100,7 +100,7 @@ class ConfigurationAgent:
         # Load existing server configurations into memory
         self._load_configurations_to_memory()
 
-        self.logger.info("ConfigurationAgent initialized successfully")
+        self.logger.info("ConfigurationManager initialized successfully")
 
     def _get_collection(self, server_id: str, collection_name: str):
         """Get ChromaDB collection for a specific server."""
@@ -1170,14 +1170,14 @@ class ConfigurationAgent:
             return {"error": str(e)}
 
 
-def get_configuration_agent() -> ConfigurationAgent:
+def get_configuration_manager() -> ConfigurationManager:
     """
-    Get singleton instance of ConfigurationAgent.
+    Get singleton instance of ConfigurationManager.
 
     Returns:
-        ConfigurationAgent instance
+        ConfigurationManager instance
     """
-    if not hasattr(get_configuration_agent, '_instance'):
-        get_configuration_agent._instance = ConfigurationAgent()
+    if not hasattr(get_configuration_manager, '_instance'):
+        get_configuration_manager._instance = ConfigurationManager()
 
-    return get_configuration_agent._instance
+    return get_configuration_manager._instance

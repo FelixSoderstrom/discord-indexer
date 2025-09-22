@@ -8,7 +8,7 @@ from src.config.settings import settings
 from src.bot.client import DiscordBot
 from src.bot.actions import setup_bot_actions
 from src.db import initialize_db
-from src.llm.agents.configuration_agent import get_configuration_agent
+from src.setup.configuration_manager import get_configuration_manager
 from src.cleanup import Cleanup
 from chromadb.errors import ChromaError
 
@@ -53,16 +53,16 @@ async def main() -> None:
 
         # Initialize configuration agent and check setup
         logger.info("⚙️ Checking bot configuration...")
-        config_agent = get_configuration_agent()
+        config_manager = get_configuration_manager()
 
-        if not config_agent.health_check():
+        if not config_manager.health_check():
             logger.error("❌ Configuration agent health check failed")
             print("\n❌ Configuration system is not healthy.")
             print("Please run 'python setup_bot.py' to configure the bot.")
             return
 
         # Check if any servers are configured
-        stats = config_agent.get_stats()
+        stats = config_manager.get_stats()
         if stats["total_servers"] == 0:
             logger.warning("⚠️ No servers configured")
             print("\n⚠️ No Discord servers are configured for this bot.")
