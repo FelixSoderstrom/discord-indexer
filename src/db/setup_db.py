@@ -19,7 +19,7 @@ from src.db.conversation_db import initialize_conversation_db
 logger = logging.getLogger(__name__)
 
 # Module-level server-specific client instances
-_clients: Dict[int, Client] = {}
+_clients: Dict[str, Client] = {}
 
 
 def initialize_db() -> None:
@@ -56,7 +56,7 @@ def initialize_db() -> None:
         raise
 
 
-def get_db(server_id: int) -> Client:
+def get_db(server_id: int, embedding_model: Optional[str] = None) -> Client:
     """Get the ChromaDB client for a specific server.
 
     Uses lazy loading to create server-specific database clients on demand.
@@ -64,6 +64,7 @@ def get_db(server_id: int) -> Client:
 
     Args:
         server_id: Discord server/guild ID
+        embedding_model: Optional embedding model name for custom embedding function
 
     Returns:
         ChromaDB client instance for the specified server
@@ -75,9 +76,12 @@ def get_db(server_id: int) -> Client:
     """
     global _clients
 
+    # Create cache key that includes embedding model for proper isolation
+    cache_key = f"{server_id}_{embedding_model or 'default'}"
+    
     # Return existing client if already initialized
-    if server_id in _clients:
-        return _clients[server_id]
+    if cache_key in _clients:
+        return _clients[cache_key]
 
     # Create server-specific database directory
     server_db_path = Path(__file__).parent / "databases" / str(server_id) / "chroma_data"
@@ -95,8 +99,8 @@ def get_db(server_id: int) -> Client:
     # Initialize ChromaDB client for this server
     try:
         client = chromadb.PersistentClient(path=str(server_db_path))
-        _clients[server_id] = client
-        logger.info(f"ChromaDB client initialized successfully for server {server_id}")
+        _clients[cache_key] = client
+        logger.info(f"ChromaDB client initialized successfully for server {server_id} with embedding model: {embedding_model or 'default'}")
         return client
     except ChromaError as e:
         logger.error(f"ChromaDB initialization failed for server {server_id}: {e}")
@@ -148,3 +152,30 @@ def get_config_db() -> sqlite3.Connection:
     except sqlite3.Error as e:
         logger.error(f"Failed to connect to server configuration database: {e}")
         raise
+
+
+def get_server_embedding_model(server_id: int) -> Optional[str]:
+    """Get the configured embedding model for a server.
+    
+    Args:
+        server_id: Discord server/guild ID
+        
+    Returns:
+        Embedding model name or None if not configured/using default
+    """
+    try:
+        with get_config_db() as conn:
+            cursor = conn.execute("""
+                SELECT embedding_model_name 
+                FROM server_configs 
+                WHERE server_id = ?
+            """, (str(server_id),))
+            
+            row = cursor.fetchone()
+            if row and row[0] and row[0] != "default":
+                return row[0]
+            return None
+            
+    except sqlite3.Error as e:
+        logger.error(f"Failed to get embedding model for server {server_id}: {e}")
+        return None

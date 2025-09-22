@@ -25,10 +25,22 @@ def create_config_tables() -> None:
                 CREATE TABLE IF NOT EXISTS server_configs (
                     server_id TEXT PRIMARY KEY,
                     message_processing_error_handling TEXT DEFAULT 'skip',
+                    embedding_model_name TEXT DEFAULT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # Add embedding_model_name column if it doesn't exist (for existing databases)
+            try:
+                conn.execute("""
+                    ALTER TABLE server_configs 
+                    ADD COLUMN embedding_model_name TEXT DEFAULT NULL
+                """)
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
+                
             conn.commit()
             logger.info("Server configuration tables created/verified")
     except sqlite3.Error as e:
@@ -82,7 +94,7 @@ def get_server_config(server_id: str) -> Optional[Dict[str, Any]]:
     try:
         with get_config_db() as conn:
             cursor = conn.execute("""
-                SELECT server_id, message_processing_error_handling, created_at, updated_at
+                SELECT server_id, message_processing_error_handling, embedding_model_name, created_at, updated_at
                 FROM server_configs 
                 WHERE server_id = ?
             """, (server_id,))
@@ -92,8 +104,9 @@ def get_server_config(server_id: str) -> Optional[Dict[str, Any]]:
                 return {
                     'server_id': row[0],
                     'message_processing_error_handling': row[1],
-                    'created_at': row[2],
-                    'updated_at': row[3]
+                    'embedding_model_name': row[2],
+                    'created_at': row[3],
+                    'updated_at': row[4]
                 }
             return None
             
@@ -102,7 +115,7 @@ def get_server_config(server_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def run_setup_terminal_ui(server_id: str, server_name: str) -> str:
+def run_setup_terminal_ui(server_id: str, server_name: str) -> Dict[str, str]:
     """Run simple terminal UI for server configuration.
     
     Args:
@@ -110,36 +123,75 @@ def run_setup_terminal_ui(server_id: str, server_name: str) -> str:
         server_name: Human-readable server name
         
     Returns:
-        Selected error handling preference ('skip' or 'stop')
+        Dictionary with error handling and embedding model preferences
     """
     print(f"\n" + "=" * 80)
     print(f"🤖 CONFIGURING SERVER: {server_name}")
     print(f"   Server ID: {server_id}")
     print("=" * 80)
+    
+    # Error handling configuration
     print("The bot needs to know how to handle processing errors.")
     print("\nWhen a message fails to process, should the bot:")
     print("1. Skip that message and continue with others (recommended)")
     print("2. Stop processing and shut down the application")
     
-    while True:
+    error_handling = None
+    while error_handling is None:
         choice = input(f"\nEnter choice for {server_name} (1 or 2): ").strip()
         
         if choice == "1":
             print(f"✅ {server_name}: Will skip failed messages and continue processing")
-            return "skip"
+            error_handling = "skip"
         elif choice == "2":
             print(f"✅ {server_name}: Will stop processing when any message fails")
-            return "stop"
+            error_handling = "stop"
         else:
             print("❌ Please enter 1 or 2")
+    
+    # Embedding model configuration
+    print(f"\n🧠 EMBEDDING MODEL CONFIGURATION")
+    print("Choose the embedding model for semantic search:")
+    print("1. Use global default (recommended)")
+    print("2. Use BGE-large-en-v1.5 (high accuracy, requires GPU)")
+    print("3. Use lightweight model (faster, less accurate)")
+    print("4. Custom model name")
+    
+    embedding_model = None
+    while embedding_model is None:
+        choice = input(f"\nEnter choice for {server_name} (1-4): ").strip()
+        
+        if choice == "1":
+            embedding_model = "default"
+            print(f"✅ {server_name}: Will use global default embedding model")
+        elif choice == "2":
+            embedding_model = "BAAI/bge-large-en-v1.5"
+            print(f"✅ {server_name}: Will use BGE-large-en-v1.5 (GPU required)")
+        elif choice == "3":
+            embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+            print(f"✅ {server_name}: Will use lightweight MiniLM model")
+        elif choice == "4":
+            custom_model = input("Enter custom model name: ").strip()
+            if custom_model:
+                embedding_model = custom_model
+                print(f"✅ {server_name}: Will use custom model {custom_model}")
+            else:
+                print("❌ Please enter a valid model name")
+        else:
+            print("❌ Please enter 1, 2, 3, or 4")
+    
+    return {
+        'error_handling': error_handling,
+        'embedding_model': embedding_model
+    }
 
 
-def save_server_config(server_id: str, error_handling: str) -> bool:
+def save_server_config(server_id: str, config: Dict[str, str]) -> bool:
     """Save server configuration to database.
     
     Args:
         server_id: Discord server/guild ID
-        error_handling: Error handling preference ('skip' or 'stop')
+        config: Dictionary containing configuration preferences
         
     Returns:
         True if saved successfully, False otherwise
@@ -148,12 +200,17 @@ def save_server_config(server_id: str, error_handling: str) -> bool:
         with get_config_db() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO server_configs 
-                (server_id, message_processing_error_handling, updated_at)
-                VALUES (?, ?, ?)
-            """, (server_id, error_handling, datetime.now().isoformat()))
+                (server_id, message_processing_error_handling, embedding_model_name, updated_at)
+                VALUES (?, ?, ?, ?)
+            """, (
+                server_id, 
+                config['error_handling'],
+                config.get('embedding_model'),
+                datetime.now().isoformat()
+            ))
             conn.commit()
             
-        logger.info(f"Saved configuration for server {server_id}: {error_handling}")
+        logger.info(f"Saved configuration for server {server_id}: {config}")
         return True
         
     except sqlite3.Error as e:
@@ -186,10 +243,10 @@ def configure_new_server(server_id: str, server_name: str) -> bool:
     """
     try:
         # Run terminal UI
-        error_handling = run_setup_terminal_ui(server_id, server_name)
+        config = run_setup_terminal_ui(server_id, server_name)
         
         # Save to database
-        if save_server_config(server_id, error_handling):
+        if save_server_config(server_id, config):
             # Update in-memory cache
             add_server_to_cache(server_id)
             print(f"✅ Server {server_name} configured successfully!")

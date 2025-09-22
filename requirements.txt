@@ -1,3 +1,7 @@
+# CUDA Installation Instructions:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+--extra-index-url https://download.pytorch.org/whl/cu128
+
 discord.py==2.6.0
 pydantic==2.11.7
 pydantic-settings==2.10.1
@@ -10,3 +14,7 @@ langchain-ollama>=0.1.0
 langchain-community>=0.2.0
 langchain-core>=0.2.0
 langchain>=0.2.0
+sentence-transformers>=2.2.0
+torch>=2.0.0
+torchvision
+torchaudio

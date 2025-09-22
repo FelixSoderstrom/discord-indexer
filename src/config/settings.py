@@ -14,6 +14,7 @@ class BotSettings(BaseSettings):
     DEBUG: bool = False
     LLM_MODEL_NAME: str
     LANGCHAIN_VERBOSE: bool = False
+    EMBEDDING_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"
     
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
     

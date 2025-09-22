@@ -6,13 +6,68 @@ ChromaDB automatically handles text embeddings for semantic search.
 
 import logging
 from typing import Dict, Any, Optional
+from chromadb.api.types import EmbeddingFunction
 
-from src.db import get_db
+from src.db import get_db, get_server_embedding_model
 from chromadb.errors import ChromaError, NotFoundError
 from src.exceptions.message_processing import DatabaseConnectionError
+from src.db.embedders.text_embedder import get_text_embedder
 
 
 logger = logging.getLogger(__name__)
+
+
+def get_collection(server_id: int, collection_name: str = "messages", custom_embedder: Optional[EmbeddingFunction] = None):
+    """Get or create a ChromaDB collection with optional custom embedder.
+    
+    Args:
+        server_id: Discord server/guild ID
+        collection_name: Name of the collection to get/create
+        custom_embedder: Optional custom embedding function
+        
+    Returns:
+        ChromaDB collection instance
+        
+    Raises:
+        ChromaError: If collection operations fail
+        RuntimeError: If custom embedder initialization fails
+    """
+    try:
+        # Get ChromaDB client for this server
+        server_embedding_model = get_server_embedding_model(server_id)
+        db_client = get_db(server_id, server_embedding_model)
+        
+        # Determine which embedder to use
+        embedder = custom_embedder
+        if embedder is None and server_embedding_model:
+            try:
+                embedder = get_text_embedder(server_embedding_model)
+                logger.info(f"Using custom embedder {server_embedding_model} for server {server_id}")
+            except RuntimeError as e:
+                logger.warning(f"Failed to load custom embedder {server_embedding_model}: {e}")
+                logger.info(f"Falling back to default embedder for server {server_id}")
+                embedder = None
+        
+        # Get or create collection with appropriate embedder
+        try:
+            if embedder is not None:
+                collection = db_client.get_or_create_collection(
+                    name=collection_name,
+                    embedding_function=embedder
+                )
+            else:
+                collection = db_client.get_or_create_collection(name=collection_name)
+                
+            logger.debug(f"Got collection '{collection_name}' for server {server_id}")
+            return collection
+            
+        except (NotFoundError, ValueError, RuntimeError) as e:
+            logger.error(f"Failed to get/create collection {collection_name} for server {server_id}: {e}")
+            raise
+            
+    except Exception as e:
+        logger.error(f"Failed to get collection for server {server_id}: {e}")
+        raise
 
 
 def store_complete_message(processed_data: Dict[str, Any]) -> bool:
@@ -45,16 +100,8 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
         return False
     
     try:
-        # Get ChromaDB client for this server
-        db_client = get_db(server_id)
-        
-        # Get or create messages collection
-        collection_name = "messages"
-        try:
-            collection = db_client.get_collection(collection_name)
-        except (NotFoundError, ValueError, RuntimeError) as e:
-            collection = db_client.create_collection(collection_name)
-            logger.info(f"Created collection '{collection_name}' for server {server_id}")
+        # Get collection with configured embedding model
+        collection = get_collection(server_id, "messages")
         
         # Prepare document content (message text + link summaries)
         document_content = message_metadata.get('content', '')

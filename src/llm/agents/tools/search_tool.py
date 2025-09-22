@@ -9,10 +9,10 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 try:
-    from src.db.setup_db import get_db
+    from src.message_processing.storage import get_collection
 except ImportError:
     # Fallback for testing
-    from src.db.setup_db import get_db
+    from src.message_processing.storage import get_collection
 
 
 logger = logging.getLogger(__name__)
@@ -45,14 +45,8 @@ class SearchTool:
             return []
         
         try:
-            # Get ChromaDB client for this server
-            client = get_db(int(self.server_id))
-            
-            # Get the messages collection
-            collection = client.get_or_create_collection(
-                name="messages",
-                metadata={"server_id": self.server_id}
-            )
+            # Get collection with configured embedding model
+            collection = get_collection(int(self.server_id), "messages")
             
             # Search for similar messages
             results = collection.query(

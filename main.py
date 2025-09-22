@@ -1,9 +1,16 @@
 import asyncio
 import logging
 import os
+import sys
 from typing import NoReturn
 from datetime import datetime
 import discord
+
+# Fix Windows console encoding for emoji support
+if sys.platform == "win32":
+    import codecs
+    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach())
 from src.config.settings import settings
 from src.bot.client import DiscordBot
 from src.bot.actions import setup_bot_actions
