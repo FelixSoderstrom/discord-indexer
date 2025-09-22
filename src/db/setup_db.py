@@ -3,10 +3,11 @@
 This module handles ChromaDB client initialization and provides centralized
 access to server-specific database clients throughout the application. Each
 server gets its own database with lazy loading for memory efficiency.
-Also manages SQLite conversation database initialization.
+Also manages SQLite conversation database initialization and server configuration storage.
 """
 
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Optional, Dict
 import chromadb
@@ -26,7 +27,7 @@ def initialize_db() -> None:
 
     Creates the base databases directory structure for server-specific databases.
     Individual server databases are created lazily when first accessed.
-    Also initializes the SQLite conversation database for DMAssistant.
+    Also initializes the SQLite conversation database for DMAssistant and server configuration storage.
 
     Raises:
         OSError: If database directory cannot be created or accessed
@@ -42,6 +43,10 @@ def initialize_db() -> None:
         # Initialize conversation database
         initialize_conversation_db()
         logger.info("Conversation database initialized successfully")
+        
+        # Initialize server configuration database
+        _initialize_config_db()
+        logger.info("Server configuration database initialized successfully")
         
     except PermissionError as e:
         logger.error(f"Insufficient permissions for database directory: {e}")
@@ -98,4 +103,48 @@ def get_db(server_id: int) -> Client:
         raise
     except (TypeError, ImportError, RuntimeError, AttributeError) as e:
         logger.error(f"Unexpected error during ChromaDB initialization for server {server_id}: {e}")
+        raise
+
+
+def _initialize_config_db() -> None:
+    """Initialize the SQLite database for server configurations."""
+    config_db_path = Path(__file__).parent / "databases" / "server_configs.db"
+    
+    try:
+        # Create database file and tables
+        with sqlite3.connect(config_db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS server_configs (
+                    server_id TEXT PRIMARY KEY,
+                    message_processing_error_handling TEXT DEFAULT 'skip',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+            
+        logger.info(f"Server configuration database ready: {config_db_path}")
+        
+    except sqlite3.Error as e:
+        logger.error(f"Failed to initialize server configuration database: {e}")
+        raise
+
+
+def get_config_db() -> sqlite3.Connection:
+    """Get SQLite connection for server configuration database.
+    
+    Returns:
+        SQLite connection to the server configuration database
+        
+    Raises:
+        sqlite3.Error: If database connection fails
+    """
+    config_db_path = Path(__file__).parent / "databases" / "server_configs.db"
+    
+    try:
+        conn = sqlite3.connect(config_db_path)
+        conn.row_factory = sqlite3.Row  # Enable dict-like access to rows
+        return conn
+    except sqlite3.Error as e:
+        logger.error(f"Failed to connect to server configuration database: {e}")
         raise

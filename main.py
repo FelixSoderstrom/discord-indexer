@@ -8,7 +8,7 @@ from src.config.settings import settings
 from src.bot.client import DiscordBot
 from src.bot.actions import setup_bot_actions
 from src.db import initialize_db
-from src.setup.configuration_manager import get_configuration_manager
+from src.setup import load_configured_servers, create_config_tables
 from src.cleanup import Cleanup
 from chromadb.errors import ChromaError
 
@@ -47,39 +47,23 @@ async def main() -> None:
     logger.info("🚀 Starting Discord Indexer Bot...")
 
     try:
-        # Initialize database
+        # Initialize database and configuration tables
         logger.info("🗄️ Initializing database...")
         initialize_db()
+        
+        logger.info("⚙️ Initializing server configuration tables...")
+        create_config_tables()
 
-        # Initialize configuration agent and check setup
-        logger.info("⚙️ Checking bot configuration...")
-        config_manager = get_configuration_manager()
-
-        if not config_manager.health_check():
-            logger.error("❌ Configuration agent health check failed")
-            print("\n❌ Configuration system is not healthy.")
-            print("Please run 'python setup_bot.py' to configure the bot.")
-            return
-
-        # Check if any servers are configured
-        stats = config_manager.get_stats()
-        if stats["total_servers"] == 0:
-            logger.warning("⚠️ No servers configured")
-            print("\n⚠️ No Discord servers are configured for this bot.")
-            print("Please run 'python setup_bot.py' to configure your server.")
-            return
-
-        # Load configuration settings into memory
-        logger.info(f"📋 Loaded configuration for {stats['total_servers']} server(s)")
-        completed_servers = stats["status_counts"].get("completed", 0)
-
-        if completed_servers == 0:
-            logger.warning("⚠️ No servers have completed setup")
-            print("\n⚠️ No servers have completed the setup process.")
-            print("Please run 'python setup_bot.py' to complete server configuration.")
-            return
-
-        logger.info(f"✅ {completed_servers} server(s) configured and ready")
+        # Load configured servers into memory cache
+        logger.info("📋 Loading server configurations...")
+        configured_servers = load_configured_servers()
+        
+        if len(configured_servers) == 0:
+            logger.info("⚠️ No servers configured yet - will configure as messages arrive")
+            print("\n⚠️ No Discord servers are pre-configured.")
+            print("The bot will automatically prompt for configuration when messages arrive from new servers.")
+        else:
+            logger.info(f"✅ {len(configured_servers)} server(s) already configured and ready")
 
         # Create bot instance
         logger.info("🤖 Creating bot instance...")

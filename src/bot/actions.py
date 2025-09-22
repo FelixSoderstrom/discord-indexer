@@ -10,7 +10,7 @@ from typing import List, Optional
 from datetime import datetime
 from dataclasses import dataclass
 from src.message_processing import MessagePipeline
-from src.setup.configuration_manager import ConfigurationManager
+from src.setup import configure_all_servers, is_server_configured
 from src.llm.agents.langchain_dm_assistant import LangChainDMAssistant
 from src.llm.agents.queue_worker import initialize_queue_worker
 from src.db.setup_db import get_db
@@ -52,7 +52,18 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
         logger.debug(f"  - Text channels: {len(guild.text_channels)}")
         logger.debug(f"  - Total channels: {len(guild.channels)}")
 
-    logger.info("=== Bot is ready! Starting message processing... ===")
+    logger.info("=== Bot is ready! Starting server configuration... ===")
+    
+    # Configure all servers before starting message processing
+    logger.info("⚙️ Configuring servers...")
+    setup_success = configure_all_servers(bot.guilds)
+    
+    if not setup_success:
+        logger.error("❌ Server configuration failed - some servers may not be processed")
+        print("\n⚠️ Some servers failed configuration. Check logs for details.")
+        print("The bot will continue but may skip unconfigured servers.")
+    
+    logger.info("=== Starting message processing systems... ===")
 
     # Initialize message pipeline with coordination event
     logger.info("🔧 Initializing message processing pipeline...")
@@ -210,13 +221,11 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
         await bot.close()
         sys.exit(1)
 
-    # Check if server is configured before indexing messages
+    # Check if server is configured (should already be configured at startup)
     server_id = str(message.guild.id)
 
-    if not ConfigurationManager.is_server_configured(server_id):
-        logger.debug(
-            f"Skipping message indexing for unconfigured server {message.guild.name} ({server_id})"
-        )
+    if not is_server_configured(server_id):
+        logger.warning(f"Skipping message indexing for unconfigured server {message.guild.name} ({server_id})")
         return
 
     # Extract message data and wrap in list for unified pipeline interface
@@ -405,7 +414,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
 
         configured_servers = []
         for server in mutual_servers:
-            if ConfigurationManager.is_server_configured(server.server_id):
+            if is_server_configured(server.server_id):
                 configured_servers.append(server)
 
         if not configured_servers:

@@ -15,7 +15,7 @@ from src.message_processing.extraction import process_message_extractions
 from src.message_processing.metadata import process_message_metadata
 from src.message_processing.storage import store_complete_message
 from src.exceptions.message_processing import MessageProcessingError, DatabaseConnectionError, LLMProcessingError
-from src.setup.configuration_manager import ConfigurationManager
+from src.setup import get_server_config
 
 
 logger = logging.getLogger(__name__)
@@ -170,6 +170,7 @@ class MessagePipeline:
             logger.info(f"Processing {len(server_messages)} messages from server {server_id}")
             
             # Sort messages chronologically within this server
+            # Note: Server configuration is now handled at junction points before reaching the pipeline
             sorted_messages = self._sort_messages_chronologically(server_messages)
             logger.info(f"Messages sorted chronologically for server {server_id}")
             
@@ -206,11 +207,8 @@ class MessagePipeline:
                     self.messages_failed += 1
 
                     # Get error handling strategy from configuration
-                    error_handling = ConfigurationManager.get_global_setting(
-                        str(server_id),
-                        'database_error_handling',
-                        'skip'  # Default to skip if not configured
-                    )
+                    config = get_server_config(server_id)
+                    error_handling = config.get('message_processing_error_handling', 'skip') if config else 'skip'
 
                     if error_handling == 'stop':
                         logger.error(f"Database operation failed for message {message_id}: {e}")
@@ -225,11 +223,8 @@ class MessagePipeline:
                     self.messages_failed += 1
 
                     # Get error handling strategy from configuration
-                    error_handling = ConfigurationManager.get_global_setting(
-                        str(server_id),
-                        'llm_error_handling',
-                        'skip'  # Default to skip if not configured
-                    )
+                    config = get_server_config(server_id)
+                    error_handling = config.get('message_processing_error_handling', 'skip') if config else 'skip'
 
                     if error_handling == 'stop':
                         logger.error(f"LLM processing failed for message {message_id}: {e}")
@@ -244,11 +239,8 @@ class MessagePipeline:
                     self.messages_failed += 1
 
                     # Get error handling strategy from configuration
-                    error_handling = ConfigurationManager.get_global_setting(
-                        str(server_id),
-                        'message_processing_error_handling',
-                        'skip'  # Default to skip if not configured
-                    )
+                    config = get_server_config(server_id)
+                    error_handling = config.get('message_processing_error_handling', 'skip') if config else 'skip'
 
                     if error_handling == 'stop':
                         logger.error(f"Message processing failed for message {message_id}: {e}")
