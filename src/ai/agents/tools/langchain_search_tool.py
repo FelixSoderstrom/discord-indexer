@@ -5,7 +5,7 @@ for seamless integration with LangChain agents.
 """
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 from langchain_core.tools import tool
 
 from src.ai.agents.tools.search_tool import create_search_tool
@@ -65,71 +65,3 @@ def create_server_specific_search_tool(server_id: str):
     return search_messages
 
 
-@tool
-def search_discord_messages(query: str, server_id: str) -> str:
-    """Search Discord message history for relevant content.
-    
-    Use this tool when users ask about past conversations, specific topics,
-    or what someone said about something. Searches the server's message history
-    using semantic similarity.
-    
-    IMPORTANT: Results will show users by their display names (friendly names) 
-    rather than technical usernames. You can search using any name variation
-    (display name, username, nickname) and find the same user's messages.
-    
-    Args:
-        query: Search query (e.g., "standup meeting", "project deadline", "John Doe messages", "what did sarah say about")
-        server_id: Discord server ID to search within (REQUIRED - no default)
-        
-    Returns:
-        Formatted string with search results including author display name, channel, timestamp, and content
-    """
-    try:
-        # Create search tool for the server
-        search_tool = create_search_tool(server_id)
-        
-        # Execute search with fixed limit
-        results = search_tool.search_messages(query, 15)
-        
-        # Format results
-        formatted_results = search_tool.format_search_results(results)
-        
-        logger.info(f"LangChain search executed: query='{query}', server={server_id}, results={len(results)}")
-        return formatted_results
-        
-    except (ConnectionError, TimeoutError, ValueError, KeyError, AttributeError, RuntimeError) as e:
-        logger.error(f"Error in LangChain search tool: {e}")
-        return f"Search failed: Unable to query message history. Error: {str(e)}"
-
-
-def get_search_tools(server_id: str) -> List:
-    """Get list of search tools configured for the given server.
-    
-    Args:
-        server_id: Discord server ID
-        
-    Returns:
-        List of LangChain tools
-    """
-    # Create a partially applied version with server_id
-    def server_search_tool(query: str) -> str:
-        return search_discord_messages(query, server_id)
-    
-    # Update the tool's metadata
-    server_search_tool.name = "search_discord_messages"
-    server_search_tool.description = f"""Search Discord message history for server {server_id}.
-    
-Use this when users ask about:
-- Past conversations or discussions
-- What someone said about a topic
-- Specific events or announcements
-- Project updates or deadlines
-
-Args:
-    query (str): Search query describing what to find
-
-Returns:
-    str: Formatted search results with author, channel, and message content
-"""
-    
-    return [search_discord_messages]

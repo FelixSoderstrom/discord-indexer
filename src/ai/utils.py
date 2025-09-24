@@ -79,28 +79,6 @@ def health_check(model_name: str) -> bool:
         return False
 
 
-def get_model_info(model_name: str) -> Dict[str, Any]:
-    """
-    Get information about the specified model
-    
-    Args:
-        model_name: Name of the model to get info for
-        
-    Returns:
-        Model information dictionary, empty dict if model not found or error
-    """
-    try:
-        client = get_ollama_client()
-        models = client.list()
-        for model in models.get("models", []):
-            if model.get("name", model.get("model", "")) == model_name:
-                return model
-        return {}
-    except (ConnectionError, TimeoutError, OSError, ValueError, KeyError, RuntimeError) as e:
-        logger.error(f"Error getting model info: {e}")
-        return {}
-
-
 # Cache for model context windows to avoid repeated subprocess calls
 _model_context_cache: Dict[str, int] = {}
 
@@ -182,10 +160,6 @@ def is_model_loaded(model_name: str) -> bool:
     """
     try:
         client = get_ollama_client()
-        
-        # Use show command to check if model is loaded
-        # A loaded model will have process info
-        import subprocess
         result = subprocess.run(
             ['ollama', 'ps'], 
             capture_output=True, 

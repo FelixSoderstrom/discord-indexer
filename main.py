@@ -15,7 +15,7 @@ from src.config.settings import settings
 from src.bot.client import DiscordBot
 from src.bot.actions import setup_bot_actions
 from src.db import initialize_db
-from src.setup import load_configured_servers, create_config_tables
+from src.setup import load_configured_servers
 from src.cleanup import Cleanup
 from src.ai.model_manager import ModelManager
 from chromadb.errors import ChromaError
@@ -56,11 +56,8 @@ async def main() -> None:
 
     try:
         # Initialize database and configuration tables
-        logger.info("🗄️ Initializing database...")
+        logger.info("🗄️ Initializing database and configuration tables...")
         initialize_db()
-        
-        logger.info("⚙️ Initializing server configuration tables...")
-        create_config_tables()
 
         # Load configured servers into memory cache
         logger.info("📋 Loading server configurations...")

@@ -280,20 +280,3 @@ class DiscordRateLimiter:
 
 
 
-    def get_status(self) -> Dict[str, Any]:
-        """Get current rate limiter status for monitoring."""
-        return {
-            "current_requests": self.current_requests,
-            "max_requests_per_second": self.max_requests_per_second,
-            "request_queue_size": len(self.request_times),
-            "last_reset": self.last_reset,
-            "rate_limit_info": self.rate_limit_info,
-        }
-
-    async def reset(self) -> None:
-        """Reset the rate limiter state."""
-        self.request_times.clear()
-        self.current_requests = 0
-        self.last_reset = time.time()
-        self.rate_limit_info = None
-        self.logger.info("Rate limiter reset")

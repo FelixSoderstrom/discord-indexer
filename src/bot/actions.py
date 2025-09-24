@@ -10,7 +10,6 @@ from typing import List, Optional
 from datetime import datetime
 from dataclasses import dataclass
 from src.message_processing import MessagePipeline
-from src.message_processing.processor import process_message_async
 from src.setup import configure_all_servers, is_server_configured
 from src.ai.agents.langchain_dm_assistant import LangChainDMAssistant
 from src.ai.agents.queue_worker import initialize_queue_worker
@@ -95,9 +94,9 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
                 "LangChain DMAssistant model not available or not responsive"
             )
 
-        # Session manager removed in Phase 1 - now using stateless queue-based processing
+        # Using stateless queue-based processing
         logger.info(
-            "✅ Using stateless queue-based processing (no session manager needed)"
+            "✅ Using stateless queue-based processing"
         )
 
         # Initialize queue worker with LangChain
@@ -116,7 +115,7 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
 
     # Process historical messages through pipeline
     logger.info("📜 Starting historical message processing through pipeline...")
-    historical_success = await bot.process_historical_messages_through_pipeline()
+    historical_success = await bot.resume_indexing_from_checkpoints()
 
     if historical_success:
         logger.info("✅ Historical message processing completed successfully")
@@ -253,10 +252,14 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
     )
 
     try:
-        # Use the NEW async processing pipeline
-        await process_message_async(message_data)
+        # Use the proper MessagePipeline for processing
+        pipeline = MessagePipeline()
+        processed_data = pipeline.process_single_message(message_data)
         
-        logger.info(f"Successfully processed message from {message.author.display_name}")
+        if processed_data:
+            logger.info(f"Successfully processed message from {message.author.display_name}")
+        else:
+            logger.warning(f"Message processing returned no data for message {message.id}")
         
     except Exception as e:
         logger.error(f"Failed to process message {message.id}: {e}")
@@ -386,7 +389,6 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
 
         return mutual_servers
 
-    # _handle_server_selection_response removed in Phase 1 - now using direct server selection in !ask command
 
     # ===== COMMAND HANDLERS =====
     @bot.command(name="ask")
@@ -607,7 +609,7 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         channel_count = len(bot.get_all_channels())
         pipeline_status = "✅ Active" if bot.message_pipeline else "❌ Inactive"
 
-        # Get queue statistics (session manager removed in Phase 1)
+        # Get queue statistics
 
         queue = get_conversation_queue()
         queue_stats = queue.get_stats()

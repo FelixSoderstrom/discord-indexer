@@ -17,36 +17,6 @@ logger = logging.getLogger(__name__)
 _configured_servers: List[str] = []
 
 
-def create_config_tables() -> None:
-    """Create server configuration tables if they don't exist."""
-    try:
-        with get_config_db() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS server_configs (
-                    server_id TEXT PRIMARY KEY,
-                    message_processing_error_handling TEXT DEFAULT 'skip',
-                    embedding_model_name TEXT DEFAULT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Add embedding_model_name column if it doesn't exist (for existing databases)
-            try:
-                conn.execute("""
-                    ALTER TABLE server_configs 
-                    ADD COLUMN embedding_model_name TEXT DEFAULT NULL
-                """)
-            except sqlite3.OperationalError:
-                # Column already exists
-                pass
-                
-            conn.commit()
-            logger.info("Server configuration tables created/verified")
-    except sqlite3.Error as e:
-        logger.error(f"Failed to create config tables: {e}")
-        raise
-
 
 def load_configured_servers() -> List[str]:
     """Load all configured server IDs into memory cache.

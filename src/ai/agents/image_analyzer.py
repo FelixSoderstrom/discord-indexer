@@ -122,61 +122,6 @@ class ImageAnalyzer:
             self.logger.error(f"Vision model error: {e}")
             raise LLMProcessingError(f"Image analysis failed: {e}")
     
-    def describe_image_sync(self, image_data: bytes) -> str:
-        """
-        Generate structured description of image content (synchronous version)
-        
-        Args:
-            image_data: Raw image bytes to analyze
-            
-        Returns:
-            Structured image description in standardized format
-            
-        Raises:
-            LLMProcessingError: If image analysis fails completely
-        """
-        try:
-            # Import sync vision function
-            from src.ai.utils import generate_image_description_sync
-            
-            # Validate input
-            if not image_data or len(image_data) == 0:
-                raise LLMProcessingError("Empty or invalid image data provided")
-            
-            self.logger.debug(f"Analyzing image using {self.model_name} (sync)")
-            
-            # Generate image description using sync utils function  
-            result = generate_image_description_sync(
-                image_data=image_data,
-                prompt=self.system_prompt,
-                model_name=self.model_name
-            )
-            
-            if not result['success']:
-                self.logger.error(f"Vision model generation failed: {result['error']}")
-                raise LLMProcessingError(f"Image analysis failed: {result['error']}")
-            
-            description = result['content'].strip()
-            
-            # Validate that we got some content
-            if not description:
-                raise LLMProcessingError("Vision model returned empty description")
-            
-            # Log the analysis
-            self.logger.info(
-                f"Image analyzed successfully "
-                f"({result['tokens_used']} tokens, {result['response_time']:.2f}s)"
-            )
-            
-            return description
-            
-        except ValueError as e:
-            self.logger.error(f"Input validation error: {e}")
-            raise LLMProcessingError(f"Invalid image data: {e}")
-        except (ConnectionError, TimeoutError, OSError, KeyError, RuntimeError) as e:
-            self.logger.error(f"Vision model error: {e}")
-            raise LLMProcessingError(f"Image analysis failed: {e}")
-    
     def health_check(self) -> bool:
         """Check if the analyzer is healthy and ready"""
         return health_check(self.model_name)

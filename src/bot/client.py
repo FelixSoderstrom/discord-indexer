@@ -52,7 +52,6 @@ class DiscordBot(commands.Bot):
             self.message_pipeline = None
             self.logger.info("Message pipeline cleared")
             
-        # Session manager removed in Phase 1 - now using stateless processing
         
         # Clear queue worker
         if hasattr(self, 'queue_worker') and self.queue_worker:
@@ -331,65 +330,7 @@ class DiscordBot(commands.Bot):
             self.logger.error(f"Error during smart resumption processing: {e}")
             return False
 
-    async def process_historical_messages_through_pipeline(self) -> bool:
-        """Legacy method - redirects to smart resumption processing.
-        
-        DEPRECATED: Use resume_indexing_from_checkpoints() directly.
-        This method is kept for compatibility during transition.
-        
-        Returns:
-            True if all historical messages processed successfully, False if failed
-        """
-        self.logger.warning("Using legacy process_historical_messages_through_pipeline - redirecting to smart resumption")
-        return await self.resume_indexing_from_checkpoints()
 
-    async def get_all_historical_messages(self) -> List[Dict[str, Any]]:
-        """Legacy method for fetching all historical messages without pipeline processing.
-
-        DEPRECATED: Use process_historical_messages_through_pipeline() instead.
-        This method bypasses the pipeline and is only kept for compatibility.
-
-        Returns:
-            List of all extracted message data from accessible channels
-        """
-        self.logger.warning("Using deprecated get_all_historical_messages - messages will bypass pipeline")
-
-        # Filter channels to only include those from configured servers
-        all_channels = self.get_all_channels()
-        configured_channels = []
-
-        for channel in all_channels:
-            server_id = str(channel.guild.id)
-            if is_server_configured(server_id):
-                configured_channels.append(channel)
-            else:
-                self.logger.info(f"Skipping channel {channel.name} from unconfigured server {channel.guild.name}")
-
-        self.logger.info(
-            f"Processing {len(configured_channels)} channels from configured servers (filtered from {len(all_channels)} total channels)..."
-        )
-
-        if not configured_channels:
-            self.logger.info("No channels from configured servers to process")
-            return []
-
-        # Use rate limiter for parallel batch fetching
-        raw_messages = await self.rate_limiter.batch_fetch_messages(
-            channels=configured_channels,
-            messages_per_channel=1000,
-            max_concurrent_channels=5,  # Fetch from 5 channels simultaneously
-        )
-
-        # Process raw messages into structured data
-        all_messages = [self._extract_message_data(msg) for msg in raw_messages]
-
-        # Update processed channels list
-        for channel in configured_channels:
-            self.processed_channels.append(channel.id)
-
-        self.logger.info(f"Total messages fetched from configured servers: {len(all_messages)}")
-        self.stored_messages.extend(all_messages)
-        return all_messages
 
     def _extract_message_data(self, message: discord.Message) -> Dict[str, Any]:
         """Extract relevant data from a Discord message.

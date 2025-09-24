@@ -127,8 +127,7 @@ discord.py==2.6.0                       # Discord API wrapper
 #### Configuration Management
 ```
 pydantic==2.11.7                        # Type validation and settings
-pydantic-settings==2.10.1               # Environment-based settings
-python-dotenv==1.1.1                    # Environment file loading
+pydantic-settings==2.10.1               # Environment-based settings (includes .env support)
 ```
 
 #### Database and Vector Storage
@@ -164,7 +163,6 @@ torchaudio                              # Audio processing utilities
 Pillow>=10.0.0                         # Image processing
 requests>=2.31.0                       # HTTP requests
 aiohttp>=3.8.0                         # Async HTTP client
-psutil>=5.9.0                          # System monitoring
 ```
 
 ### Python Version Requirements

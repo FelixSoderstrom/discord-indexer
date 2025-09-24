@@ -243,20 +243,6 @@ Use the search_messages tool when users ask about past conversations or events i
             return "❌ **Processing Error**: I encountered an issue while processing your message. Please try again."
     
     
-    def health_check(self) -> bool:
-        """Check if the assistant is healthy and ready (synchronous version - deprecated).
-        
-        Warning: This method blocks the async event loop and should not be used
-        during bot startup. Use health_check_async() instead.
-        """
-        self.logger.warning("Using deprecated synchronous health_check(). Use health_check_async() instead.")
-        try:
-            # Test the LLM connection
-            test_response = self.llm.invoke([HumanMessage(content="test")])
-            return bool(test_response.content)
-        except (ValueError, RuntimeError, ConnectionError, AttributeError, TimeoutError) as e:
-            self.logger.error(f"Health check failed: {e}")
-            return False
     
     async def health_check_async(self, timeout_seconds: float = 60.0, quick_mode: bool = False) -> bool:
         """Check if the assistant is healthy and ready (async version).

@@ -6,7 +6,6 @@ from typing import List, Optional
 from io import BytesIO
 from PIL import Image
 
-from src.ai.utils import generate_image_description_sync
 from src.ai.model_manager import ModelManager
 from src.exceptions.message_processing import MessageProcessingError
 from src.config.settings import settings
