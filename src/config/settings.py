@@ -1,4 +1,5 @@
 import discord
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,11 +13,21 @@ class BotSettings(BaseSettings):
     DISCORD_TOKEN: str
     COMMAND_PREFIX: str = "!"
     DEBUG: bool = False
-    LLM_MODEL_NAME: str
+    TEXT_MODEL_NAME: str
+    VISION_MODEL_NAME: str
     LANGCHAIN_VERBOSE: bool = False
     EMBEDDING_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"
     
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+    
+    @property
+    def LLM_MODEL_NAME(self) -> str:
+        """Backward compatibility property for TEXT_MODEL_NAME.
+        
+        Returns:
+            The text model name (same as TEXT_MODEL_NAME)
+        """
+        return self.TEXT_MODEL_NAME
     
     @property
     def get_intents(self) -> discord.Intents:

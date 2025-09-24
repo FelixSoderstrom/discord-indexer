@@ -17,6 +17,7 @@ from src.bot.actions import setup_bot_actions
 from src.db import initialize_db
 from src.setup import load_configured_servers, create_config_tables
 from src.cleanup import Cleanup
+from src.ai.model_manager import ModelManager
 from chromadb.errors import ChromaError
 
 
@@ -72,6 +73,37 @@ async def main() -> None:
         else:
             logger.info(f"✅ {len(configured_servers)} server(s) already configured and ready")
 
+        # Preload embedding models to prevent runtime blocking
+        logger.info("🔤 Preloading embedding models...")
+        try:
+            from src.db.embedders import preload_embedder
+            await preload_embedder("BAAI/bge-large-en-v1.5")
+            logger.info("✅ BGE embedding model preloaded successfully")
+        except Exception as e:
+            logger.warning(f"Failed to preload BGE embedding model: {e}")
+            logger.info("BGE model will be loaded on first use (may cause delays)")
+
+        # Initialize ModelManager and load both models
+        logger.info("🧠 Initializing ModelManager...")
+        model_manager = ModelManager()
+        
+        # Health check both models
+        logger.info("🔍 Performing health checks on both models...")
+        health_results = model_manager.health_check_both_models()
+        
+        if health_results['both_healthy']:
+            logger.info(f"✅ Both models loaded and healthy - "
+                       f"text:{health_results['text_model']['response_time']:.2f}s, "
+                       f"vision:{health_results['vision_model']['response_time']:.2f}s")
+        else:
+            error_msg = "Model health check failed: "
+            if not health_results['text_model']['healthy']:
+                error_msg += f"Text model error: {health_results['text_model']['error']}. "
+            if not health_results['vision_model']['healthy']:
+                error_msg += f"Vision model error: {health_results['vision_model']['error']}. "
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
         # Create bot instance
         logger.info("🤖 Creating bot instance...")
         bot = DiscordBot()
@@ -91,7 +123,7 @@ async def main() -> None:
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped by user")
     except (discord.LoginFailure, discord.HTTPException, discord.ConnectionClosed,
-            ValueError, OSError, RuntimeError, ChromaError) as e:
+            ValueError, OSError, RuntimeError, ChromaError, ConnectionError, TimeoutError, KeyError) as e:
         logger.error(f"Failed to start bot: {e}")
         raise
     finally:
