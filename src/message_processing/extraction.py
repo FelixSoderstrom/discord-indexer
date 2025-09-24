@@ -10,7 +10,7 @@ import re
 
 from src.message_processing.scraper import get_content
 from src.exceptions.message_processing import MessageProcessingError, LLMProcessingError
-from src.llm.agents.link_analyzer import LinkAnalyzer
+from src.ai.agents.link_analyzer import LinkAnalyzer
 
 
 logger = logging.getLogger(__name__)

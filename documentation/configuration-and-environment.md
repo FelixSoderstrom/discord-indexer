@@ -16,8 +16,10 @@ class BotSettings(BaseSettings):
     DISCORD_TOKEN: str                    # Required Discord bot token
     COMMAND_PREFIX: str = "!"             # Bot command prefix (default: "!")
     DEBUG: bool = False                   # Debug mode flag (default: False)
-    LLM_MODEL_NAME: str                   # Local LLM model name
+    TEXT_MODEL_NAME: str                  # Text processing model (aliases: LLM_NAME)
+    VISION_MODEL_NAME: str                # Image processing model (aliases: VLM_NAME)
     LANGCHAIN_VERBOSE: bool = False       # LangChain debug output
+    EMBEDDING_MODEL_NAME: str             # Sentence transformer for embeddings
     
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
 ```
@@ -61,14 +63,24 @@ DEBUG=True                               # Enable debug logging
 LANGCHAIN_VERBOSE=false                  # LangChain debug output
 ```
 
-#### LLM Model Configuration
+#### Dual Model Configuration
 ```bash
-# Local LLM model selection
-LLM_MODEL_NAME=llama3.1:8b              # Primary model
-# Alternative models (commented examples)
-# LLM_MODEL_NAME=qwen2.5-coder:32b      # Code-focused model
-# LLM_MODEL_NAME=mistral-nemo            # Alternative option
+# Text processing model (for DMAssistant and LinkAnalyzer)
+LLM_NAME=llama3.2:3b                    # Lightweight text model for conversation and analysis
+
+# Vision processing model (for image analysis)
+VLM_NAME=minicpm-v                      # Vision-language model for image processing
+
+# Embedding model for vector similarity search
+EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
 ```
+
+**Model Configuration Notes:**
+- **TEXT_MODEL_NAME** (mapped from LLM_NAME): Used by DMAssistant for conversation responses and LinkAnalyzer for web content processing
+- **VISION_MODEL_NAME** (mapped from VLM_NAME): Used by image processing pipeline for analyzing uploaded images and screenshots
+- **Both models load simultaneously at startup** with 30-minute keep-alive to maintain responsiveness
+- **Memory requirement**: Approximately 8-12GB VRAM depending on model sizes
+- **Model availability**: Ollama automatically downloads missing models during initialization
 
 #### Optional Ollama Configuration
 ```bash
@@ -94,7 +106,9 @@ DEBUG=True
 LANGCHAIN_VERBOSE=false
 
 # Model Configuration
-LLM_MODEL_NAME=llama3.1:8b
+LLM_NAME=llama3.2:3b
+VLM_NAME=minicpm-v
+EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
 ```
 
 ## Dependency Management
@@ -219,35 +233,59 @@ def initialize_db() -> None:
         raise
 ```
 
-### LLM Model Validation
+### Dual Model Validation and Loading
 
-Automated model availability checking and health validation:
+The system implements simultaneous loading and health checking of both text and vision models:
 
 ```python
-# Model availability validation
-def ensure_model_available(model_name: str) -> None:
-    client = get_ollama_client()
-    models = client.list()
-    model_names = [model.get("name") for model in models.get("models", [])]
-    
-    if model_name not in model_names:
-        logger.info(f"Downloading model {model_name}...")
-        client.pull(model_name)
+# Dual model manager initialization
+class ModelManager:
+    def __init__(self) -> None:
+        self._text_model_name = settings.TEXT_MODEL_NAME    # From LLM_NAME
+        self._vision_model_name = settings.VISION_MODEL_NAME # From VLM_NAME
+        self.ensure_models_loaded()  # Load both models simultaneously
 
-# Health check validation
-def health_check(model_name: str) -> bool:
-    try:
-        client = get_ollama_client()
-        client.chat(
-            model=model_name,
-            messages=[{"role": "user", "content": "Hello"}],
-            options={"num_predict": 10}
-        )
-        return True
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return False
+# Simultaneous model loading with keep-alive
+def ensure_models_loaded(self) -> None:
+    # Download models if not available
+    ensure_model_available(self._vision_model_name)
+    ensure_model_available(self._text_model_name)
+    
+    # Load both models into memory with 30-minute keep-alive
+    client = get_ollama_client()
+    
+    # Vision model first
+    client.chat(
+        model=self._vision_model_name,
+        messages=[{"role": "user", "content": "Hello"}],
+        options={"num_predict": 10},
+        keep_alive="30m"  # Prevent unloading
+    )
+    
+    # Text model second
+    client.chat(
+        model=self._text_model_name,
+        messages=[{"role": "user", "content": "Hello"}],
+        options={"num_predict": 10},
+        keep_alive="30m"  # Prevent unloading
+    )
+
+# Health check both models
+def health_check_both_models(self) -> Dict[str, Any]:
+    text_healthy = health_check(self._text_model_name)
+    vision_healthy = health_check(self._vision_model_name)
+    return {
+        'text_model': {'healthy': text_healthy},
+        'vision_model': {'healthy': vision_healthy},
+        'both_healthy': text_healthy and vision_healthy
+    }
 ```
+
+**Model Loading Architecture:**
+- **Startup Sequence**: Both models load during application initialization, not on-demand
+- **Memory Persistence**: 30-minute keep-alive prevents Ollama from unloading models
+- **Failure Handling**: System fails hard if either model cannot load - no fallback logic
+- **Health Monitoring**: Periodic checks ensure both models remain responsive
 
 ### Discord Connection Validation
 
@@ -320,38 +358,67 @@ class MessageProcessingError(Exception):
 
 ### Target System Specifications
 
-The project is optimized for consumer hardware:
+The project is optimized for consumer hardware with dual model requirements:
 
 ```
 Target Hardware:
-- GPU: RTX 3090 (24GB VRAM)
-- RAM: 16GB system memory
+- GPU: RTX 3090 (24GB VRAM) or equivalent
+- VRAM Usage: 8-12GB for simultaneous text + vision models
+- RAM: 24GB system memory (increased for dual model operation)
 - Storage: SSD recommended for database performance
 ```
 
+**Dual Model Memory Requirements:**
+- **Text Model (llama3.2:3b)**: ~2-3GB VRAM
+- **Vision Model (minicpm-v)**: ~4-6GB VRAM
+- **ChromaDB**: ~2-4GB system RAM
+- **Discord Operations**: ~1-2GB system RAM
+- **Total Estimated**: 8-12GB VRAM + 8-12GB system RAM active usage
+
 ### Performance Configuration
 
-#### Model Selection Strategy
+#### Dual Model Selection Strategy
 ```bash
-# Primary model (balanced performance/memory)
-LLM_MODEL_NAME=llama3.1:8b
+# Text processing model - optimized for conversation and analysis
+LLM_NAME=llama3.2:3b                   # Lightweight, fast responses for DMAssistant
+# LLM_NAME=llama3.1:8b                 # Higher quality for complex text analysis
+# LLM_NAME=qwen2.5-coder:32b           # Code-focused tasks (high memory)
 
-# High-performance alternatives
-# LLM_MODEL_NAME=qwen2.5-coder:32b    # Code-focused, higher memory
-# LLM_MODEL_NAME=qwen2.5:14b-instruct # Instruction-tuned variant
+# Vision processing model - optimized for image understanding
+VLM_NAME=minicpm-v                     # Balanced vision-language model
+# VLM_NAME=llama3.2-vision:11b         # Alternative vision model
+# VLM_NAME=qwen2.5vl:7b                # Higher quality vision processing
 ```
 
-#### Memory Management
+**Model Selection Considerations:**
+- **Text Model**: Prioritize response speed for interactive conversations (DMAssistant)
+- **Vision Model**: Balance accuracy and inference speed for image processing
+- **Memory Constraints**: Both models must fit simultaneously in available VRAM
+- **Tool Calling**: Text model must support function calling for LinkAnalyzer features
+
+#### Dual Model Memory Management
 ```python
-# Model unloading for memory management
-def unload_model_from_memory(model_name: str) -> bool:
-    client.chat(
-        model=model_name,
-        messages=[{"role": "user", "content": "unload"}],
-        options={"num_predict": 1},
-        keep_alive=0,  # Immediate unload
-    )
+# Simultaneous model memory management
+class ModelManager:
+    def ensure_models_loaded(self) -> None:
+        # Both models loaded with persistent keep-alive
+        vision_memory = self._load_model_persistent(self._vision_model_name)
+        text_memory = self._load_model_persistent(self._text_model_name)
+        
+    def _load_model_persistent(self, model_name: str) -> None:
+        client.chat(
+            model=model_name,
+            messages=[{"role": "user", "content": "Hello"}],
+            options={"num_predict": 10},
+            keep_alive="30m"  # Persistent loading
+        )
 ```
+
+**Memory Management Strategy:**
+- **No Dynamic Unloading**: Both models remain loaded for application lifetime
+- **Keep-Alive Setting**: 30-minute timeout prevents automatic unloading
+- **VRAM Requirements**: Plan for 8-12GB VRAM usage depending on model sizes
+- **System Memory**: Additional 4-8GB system RAM for ChromaDB and Discord operations
 
 #### Context Window Detection
 ```python
@@ -383,6 +450,8 @@ def get_model_max_context(model_name: str) -> int:
    DISCORD_TOKEN=production_token_here
    DEBUG=False
    LANGCHAIN_VERBOSE=false
+   LLM_NAME=llama3.2:3b
+   VLM_NAME=minicpm-v
    ```
 
 3. **Database Persistence**
@@ -423,10 +492,18 @@ def get_model_max_context(model_name: str) -> int:
    Solution: Ensure DISCORD_TOKEN is set in .env
    ```
 
-2. **Invalid Model Name**
+2. **Invalid Model Names**
    ```
-   Error: Model not found in Ollama
+   Error: Text model not found in Ollama
    Solution: Check available models with `ollama list`
+   Verify both LLM_NAME and VLM_NAME are correct
+   ```
+   
+3. **Insufficient VRAM for Dual Models**
+   ```
+   Error: Failed to load models simultaneously
+   Solution: Use smaller models or increase VRAM
+   Consider llama3.2:1b for text or lighter vision models
    ```
 
 3. **Database Permission Errors**
