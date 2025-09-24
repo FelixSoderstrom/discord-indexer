@@ -118,8 +118,8 @@ class Cleanup:
         """Clean up LLM-related resources.
 
         Handles:
+        - Queue workers: stop conversation processing workers FIRST
         - Ollama models: unload from memory using keep_alive=0
-        - Queue workers: stop conversation processing workers
         - LLM connections: close Ollama client connections
 
         Raises:
@@ -128,14 +128,46 @@ class Cleanup:
         try:
             self.logger.info("Starting LLM resource cleanup...")
 
-            # Stop queue worker if running
+            # Stop queue worker FIRST and give it time to fully terminate
             if hasattr(self.bot, 'queue_worker') and self.bot.queue_worker:
-                self.logger.info("Stopping conversation queue worker...")
+                self.logger.info("Stopping conversation queue worker with extended timeout...")
                 try:
-                    await self.bot.queue_worker.stop()
-                    self.logger.info("Queue worker stopped successfully")
+                    # Use a longer timeout for queue worker shutdown
+                    await asyncio.wait_for(self.bot.queue_worker.stop(), timeout=10.0)
+                    # Extra wait to ensure background tasks are fully cleaned up
+                    await asyncio.sleep(3.0)
+                    self.bot.queue_worker = None
+                    self.logger.info("Queue worker stopped and cleared successfully")
+                except asyncio.TimeoutError:
+                    self.logger.warning("Queue worker stop timed out - forcing cleanup")
+                    self.bot.queue_worker = None
                 except Exception as e:
                     self.logger.warning(f"Error stopping queue worker: {e}")
+                    self.bot.queue_worker = None
+
+            # Cancel any remaining asyncio tasks that might be related to LLM operations
+            try:
+                current_task = asyncio.current_task()
+                all_tasks = [task for task in asyncio.all_tasks() if task != current_task and not task.done()]
+                
+                if all_tasks:
+                    self.logger.info(f"Found {len(all_tasks)} running tasks - checking for LLM-related tasks...")
+                    
+                    # Cancel tasks that might be related to queue processing or LLM operations
+                    llm_tasks = []
+                    for task in all_tasks:
+                        task_name = task.get_name()
+                        if any(keyword in task_name.lower() for keyword in ['queue', 'worker', 'conversation', 'llm', 'assistant']):
+                            llm_tasks.append(task)
+                            task.cancel()
+                    
+                    if llm_tasks:
+                        self.logger.info(f"Cancelled {len(llm_tasks)} LLM-related background tasks")
+                        # Wait a bit for cancellation to complete
+                        await asyncio.sleep(2.0)
+                        
+            except Exception as e:
+                self.logger.warning(f"Error during background task cleanup: {e}")
 
             # Unload Ollama model from memory
             model_name = settings.LLM_MODEL_NAME

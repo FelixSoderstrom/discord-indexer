@@ -64,20 +64,37 @@ class ConversationQueueWorker:
         logger.info("Queue worker started")
     
     async def stop(self) -> None:
-        """Stop the worker loop."""
+        """Stop the worker loop and ensure clean shutdown."""
         if not self.running:
+            logger.info("Queue worker already stopped")
             return
         
+        logger.info("Stopping queue worker...")
         self.running = False
         
         if self._worker_task:
+            logger.info("Cancelling worker task...")
             self._worker_task.cancel()
+            
             try:
-                await self._worker_task
+                # Wait for the task to actually finish with a timeout
+                await asyncio.wait_for(self._worker_task, timeout=5.0)
+                logger.info("Worker task cancelled successfully")
             except asyncio.CancelledError:
-                pass
+                logger.info("Worker task cancelled")
+            except asyncio.TimeoutError:
+                logger.warning("Worker task did not stop within timeout")
+            except Exception as e:
+                logger.error(f"Error stopping worker task: {e}")
+            finally:
+                self._worker_task = None
         
-        logger.info("Queue worker stopped")
+        # Clear the DM assistant reference to break any potential reference cycles
+        if hasattr(self, 'dm_assistant'):
+            self.dm_assistant = None
+            logger.info("DMAssistant reference cleared from queue worker")
+        
+        logger.info("Queue worker stopped completely")
     
     async def _log_conversation_message(
         self, 

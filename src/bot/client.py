@@ -47,24 +47,35 @@ class DiscordBot(commands.Bot):
 
     async def close(self) -> None:
         """Clean shutdown of bot connection."""
+        self.logger.info("Starting bot shutdown sequence...")
+        
+        # Clear queue worker FIRST to prevent it from trying to use Discord connections
+        if hasattr(self, 'queue_worker') and self.queue_worker:
+            self.logger.info("Stopping queue worker...")
+            try:
+                await self.queue_worker.stop()
+                # Give extra time for the worker loop to fully terminate
+                await asyncio.sleep(2.0)
+                self.queue_worker = None
+                self.logger.info("Queue worker stopped and cleared")
+            except Exception as e:
+                self.logger.error(f"Error stopping queue worker: {e}")
+                self.queue_worker = None
+        
         # Clear message pipeline reference
         if self.message_pipeline:
             self.message_pipeline = None
             self.logger.info("Message pipeline cleared")
-            
-        
-        # Clear queue worker
-        if hasattr(self, 'queue_worker') and self.queue_worker:
-            await self.queue_worker.stop()
-            self.queue_worker = None
-            self.logger.info("Queue worker stopped")
             
         # Clear DMAssistant reference
         if hasattr(self, 'dm_assistant') and self.dm_assistant:
             self.dm_assistant = None
             self.logger.info("DMAssistant cleared")
 
+        # Close the actual Discord connection
+        self.logger.info("Closing Discord connection...")
         await super().close()
+        self.logger.info("Bot shutdown sequence completed")
 
     async def setup_hook(self) -> None:
         """Called when bot is starting up."""
