@@ -84,3 +84,15 @@ class DatabaseCleanupError(CleanupError):
     def __init__(self, message: str = "Database cleanup failed"):
         super().__init__(message)
         logger.warning(f"Database cleanup failed: {message}")
+
+
+class EmbeddingError(Exception):
+    """
+    This exception is raised when embedding model operations fail
+    due to model loading, CUDA errors, or embedding generation failures.
+
+    Triggering this exception allows proper error handling for embedding operations.
+    """
+    def __init__(self, message: str = "Embedding operation failed"):
+        super().__init__(message)
+        logger.error(f"Embedding operation failed: {message}")
