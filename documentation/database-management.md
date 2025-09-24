@@ -2,16 +2,17 @@
 
 ## Overview
 
-The discord-indexer implements a hybrid database architecture combining ChromaDB for vector storage and semantic search with SQLite for conversation persistence. This design enables efficient message indexing, similarity-based retrieval, and conversational context management while maintaining server isolation and optimal performance on consumer hardware.
+The discord-indexer implements a hybrid database architecture combining ChromaDB for vector storage and semantic search with SQLite for conversation persistence and server configuration. This design enables efficient message indexing, similarity-based retrieval, conversational context management, and custom embedding model support while maintaining server isolation and optimal performance on consumer hardware.
 
 ## Database Architecture
 
 ### Hybrid Database Design
 
-The system employs two complementary database systems:
+The system employs three complementary database systems:
 
-1. **ChromaDB (Vector Storage)**: Handles message content embeddings and semantic search
+1. **ChromaDB (Vector Storage)**: Handles message content embeddings and semantic search with custom embedding model support
 2. **SQLite (Conversation Storage)**: Manages conversation history and metadata for DMAssistant
+3. **SQLite (Server Configuration)**: Stores server-specific settings including custom embedding models
 
 ### Server Isolation
 
@@ -19,15 +20,16 @@ Each Discord server gets its own isolated database environment:
 
 ```
 databases/
-conversations.sqlite3   # Shared conversation database
-{server_id_1}/
-chroma_data/            # ChromaDB for server 1
-{server_id_2}/
-chroma_data/            # ChromaDB for server 2
-...
+├── conversations.sqlite3        # Shared conversation database
+├── server_configs.db           # Server configuration database
+├── {server_id_1}/
+│   └── chroma_data/            # ChromaDB for server 1
+├── {server_id_2}/
+│   └── chroma_data/            # ChromaDB for server 2
+└── ...
 ```
 
-This architecture prevents cross-server data leakage and enables server-specific optimization.
+This architecture prevents cross-server data leakage and enables server-specific optimization including custom embedding models.
 
 ## ChromaDB Vector Storage System
 
@@ -35,15 +37,18 @@ This architecture prevents cross-server data leakage and enables server-specific
 
 **File**: `src/db/setup_db.py`
 
-The database initialization follows a lazy-loading pattern:
+The database initialization follows a lazy-loading pattern with custom embedding model support:
 
 ```python
-def get_db(server_id: int) -> Client:
+def get_db(server_id: int, embedding_model: Optional[str] = None) -> Client:
     """Get ChromaDB client for specific server with lazy initialization."""
     global _clients
     
-    if server_id in _clients:
-        return _clients[server_id]
+    # Create cache key that includes embedding model for proper isolation
+    cache_key = f"{server_id}_{embedding_model or 'default'}"
+    
+    if cache_key in _clients:
+        return _clients[cache_key]
     
     # Create server-specific database path
     server_db_path = Path(__file__).parent / "databases" / str(server_id) / "chroma_data"
@@ -51,53 +56,91 @@ def get_db(server_id: int) -> Client:
     
     # Initialize persistent ChromaDB client
     client = chromadb.PersistentClient(path=str(server_db_path))
-    _clients[server_id] = client
+    _clients[cache_key] = client
     return client
 ```
 
 **Key Features:**
-- Server-specific client caching for performance
+- Server-specific client caching with embedding model isolation
+- Custom embedding model support per server
 - Automatic directory structure creation
 - Persistent storage for embeddings and metadata
-- Thread-safe client management
+- Thread-safe client management with proper error handling
 
 ### Collection Management
 
-Each server uses a standardized "messages" collection:
+**File**: `src/message_processing/storage.py`
+
+Each server uses a standardized "messages" collection with singleton embedding model support:
 
 ```python
-collection = db_client.get_or_create_collection(
-    name="messages",
-    metadata={"server_id": str(server_id)}
-)
+def get_collection(server_id: int, collection_name: str = "messages", custom_embedder: Optional[EmbeddingFunction] = None):
+    """Get or create ChromaDB collection with optimal embedder reuse."""
+    # Get configured embedding model for this server
+    server_embedding_model = get_server_embedding_model(server_id)
+    db_client = get_db(server_id, server_embedding_model)
+    
+    # Use singleton embedder to prevent multiple model loading
+    embedder = custom_embedder
+    if embedder is None and server_embedding_model:
+        embedder = get_text_embedder(server_embedding_model)
+    
+    # Create collection with appropriate embedder
+    if embedder is not None:
+        collection = db_client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=embedder
+        )
+    else:
+        collection = db_client.get_or_create_collection(name=collection_name)
+    
+    return collection
 ```
 
 **Collection Schema:**
-- **Documents**: Message content + link summaries (if available)
-- **Metadata**: Comprehensive Discord context (author, channel, guild, timestamps)
+- **Documents**: Message content + link summaries + image descriptions (if available)
+- **Metadata**: Comprehensive Discord context (author, channel, guild, timestamps, processing metadata)
 - **IDs**: Format `msg_{message_id}` for unique identification
-- **Embeddings**: Generated automatically by ChromaDB
+- **Embeddings**: Generated by custom BGE models or ChromaDB default
 
 ### Vector Storage Process
 
 **File**: `src/message_processing/storage.py`
 
-The storage process handles complete message data with metadata extraction:
+The storage process handles complete message data with comprehensive content integration:
 
 ```python
 def store_complete_message(processed_data: Dict[str, Any]) -> bool:
     # Extract metadata components
     metadata = processed_data.get('metadata', {})
-    message_metadata = metadata.get('message_metadata', {})
-    guild_metadata = metadata.get('guild_metadata', {})
-    # ... other metadata extraction
+    extractions = processed_data.get('extractions', {})
+    embeddings = processed_data.get('embeddings', {})
     
-    # Prepare document content
+    # Get collection with configured embedding model
+    collection = get_collection(server_id, "messages")
+    
+    # Prepare comprehensive document content
     document_content = message_metadata.get('content', '')
-    if extractions and extractions.get('link_summaries_combined'):
-        document_content = f"{document_content}\n\n{link_summaries}"
     
-    # Store with automatic embedding generation
+    # Add link summaries if available
+    if extractions and extractions.get('link_summaries_combined'):
+        link_summaries = extractions['link_summaries_combined']
+        if document_content:
+            document_content = f"{document_content}\n\n{link_summaries}"
+        else:
+            document_content = link_summaries
+    
+    # Add image descriptions if available
+    if embeddings and embeddings.get('image_descriptions'):
+        image_descriptions = embeddings['image_descriptions']
+        if document_content:
+            document_content = f"Discord message: {document_content}\nImage description: {image_descriptions}"
+        else:
+            document_content = f"Image description: {image_descriptions}"
+    elif document_content:
+        document_content = f"Discord message: {document_content}"
+    
+    # Store with rich metadata
     collection.add(
         documents=[document_content],
         metadatas=[chroma_metadata],
@@ -106,110 +149,225 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
 ```
 
 **Storage Features:**
-- Automatic text embedding generation
+- Custom embedding model support per server
+- Automatic text embedding generation via BGE models
 - Link summary integration
-- Rich metadata preservation
+- Image description integration via vision models
+- Rich metadata preservation including processing metadata
 - Duplicate prevention via unique IDs
+- Error handling with specific exception types
 
 ## Embedding System
 
-### Text Embedding Strategy
+### Custom Text Embedding System
 
-ChromaDB handles text embeddings automatically using its default embedding model. This eliminates the need for manual embedding generation and ensures consistent vector representations.
+**File**: `src/db/embedders/text_embedder.py`
 
-### Image Embedding (Placeholder)
+The system implements a comprehensive BGE (BAAI General Embedding) text embedding system with GPU optimization:
+
+```python
+class BGETextEmbedder(EmbeddingFunction[Documents]):
+    """BGE-large-en-v1.5 embedding function for ChromaDB.
+    
+    Implements ChromaDB's EmbeddingFunction interface using BGE models
+    via sentence-transformers with GPU acceleration and singleton pattern.
+    """
+    
+    def __init__(self, model_name: str = "BAAI/bge-large-en-v1.5", device: Optional[str] = None):
+        """Initialize with GPU auto-detection and model loading optimization."""
+        if device is None:
+            if torch.cuda.is_available():
+                self.device = "cuda"
+            else:
+                raise EmbeddingError("BGE-large-en-v1.5 requires GPU but CUDA is not available")
+        
+        self._model: Optional[SentenceTransformer] = None
+        self._model_loaded = False
+        self._load_lock = threading.Lock()
+
+def get_text_embedder(model_name: str = "BAAI/bge-large-en-v1.5") -> BGETextEmbedder:
+    """Get a singleton text embedder instance to prevent expensive model reloading."""
+    global _embedder_instances, _embedder_lock
+    
+    with _embedder_lock:
+        if model_name not in _embedder_instances:
+            _embedder_instances[model_name] = BGETextEmbedder(model_name=model_name)
+        return _embedder_instances[model_name]
+```
+
+**Key Features:**
+- **Singleton Pattern**: Prevents expensive model reloading across the application
+- **GPU Optimization**: Requires CUDA for performance on RTX 3090 hardware
+- **Thread-Safe**: Uses locks for concurrent access
+- **Async Support**: Provides async embedding generation to prevent event loop blocking
+- **Multiple Models**: Supports BGE variants and sentence-transformers models
+
+### Supported Embedding Models
+
+**Available Models:**
+- `BAAI/bge-large-en-v1.5` (default, high quality)
+- `BAAI/bge-base-en-v1.5` (balanced performance)  
+- `BAAI/bge-small-en-v1.5` (lightweight)
+- `sentence-transformers/all-MiniLM-L6-v2` (compact)
+- `sentence-transformers/all-mpnet-base-v2` (alternative)
+
+### Image Processing Integration
 
 **File**: `src/message_processing/embedding.py`
 
-Currently implements a placeholder for future image embedding functionality:
+The system processes image attachments using vision models to generate text descriptions:
 
 ```python
 def process_message_embeddings(message_data: Dict[str, Any], extractions: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     embedding_results = {
-        'image_embeddings': [],
+        'image_descriptions': '',
         'embedding_metadata': {
             'images_processed': 0,
-            'embedding_model_version': 'placeholder-v1'
+            'processing_model': settings.VISION_MODEL_NAME,
+            'processing_successful': False
         }
     }
     
-    # Image embedding not implemented - ChromaDB handles text embeddings automatically
-    if message_data.get('attachments'):
-        logger.info(f"Found {len(message_data['attachments'])} image attachments (image embedding not implemented)")
+    # Process image attachments if present
+    attachments = message_data.get('attachments', [])
+    if attachments:
+        # Generate descriptions for all images
+        image_descriptions = process_message_images(attachments)
+        embedding_results['image_descriptions'] = image_descriptions
+        embedding_results['embedding_metadata']['images_processed'] = len(attachments)
+        embedding_results['embedding_metadata']['processing_successful'] = True
     
     return embedding_results
 ```
+
+**Image Processing Features:**
+- Vision model integration for image description generation
+- Text descriptions are embedded using the same text embedding pipeline
+- Comprehensive error handling and processing metadata
+- Integration with ChromaDB storage for searchable image content
 
 ## Vector Retrieval and Search System
 
 ### Semantic Search Implementation
 
-**File**: `src/llm/agents/tools/search_tool.py`
+**File**: `src/ai/agents/tools/search_tool.py`
 
-The search system provides semantic similarity search across message history:
+The search system provides semantic similarity search with intelligent author name resolution:
 
 ```python
 class SearchTool:
     def search_messages(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        client = get_db(int(self.server_id))
-        collection = client.get_or_create_collection(
-            name="messages",
-            metadata={"server_id": self.server_id}
-        )
+        # Get collection with configured embedding model
+        collection = get_collection(int(self.server_id), "messages")
         
-        # Perform semantic search
+        # Perform semantic search with custom embedder
         results = collection.query(
             query_texts=[query],
             n_results=min(limit, self.max_results),
             include=['documents', 'metadatas', 'distances']
         )
         
-        # Format with relevance scores
+        # Format with intelligent author display names
         for doc, metadata, distance in zip(...):
+            # Priority order: display name > global name > nickname > username
+            author_display = (
+                metadata.get('author_display_name') or 
+                metadata.get('author_global_name') or 
+                metadata.get('author_nick') or 
+                metadata.get('author_name', 'Unknown')
+            )
+            
             formatted_results.append({
                 'content': doc,
-                'author': metadata.get('author_name', 'Unknown'),
+                'author': author_display,
                 'channel': metadata.get('channel_name', 'Unknown'),
                 'timestamp': metadata.get('timestamp', ''),
                 'relevance_score': round(1.0 - distance, 3)
             })
 ```
 
-**Search Features:**
-- Semantic similarity matching
-- Relevance score calculation (1.0 - distance)
-- Server-scoped search results
-- Rich metadata in results
-- Configurable result limits
+**Enhanced Search Features:**
+- **Custom Embedding Models**: Uses server-specific BGE or other configured models
+- **Intelligent Author Resolution**: Prioritizes friendly display names over technical usernames
+- **Semantic Similarity**: Leverages high-quality BGE embeddings for better relevance
+- **Rich Context**: Includes image descriptions and link summaries in searchable content
+- **Relevance Scoring**: Converts cosine distance to intuitive relevance scores
+- **Server-Scoped**: Results isolated per Discord server
+- **Performance Optimized**: Uses singleton embedders for consistent performance
 
-### Database Query Optimization
+### Database Query Optimization and Resumption
 
 **File**: `src/message_processing/resumption.py`
 
-The resumption system demonstrates efficient database queries for processing state:
+The resumption system provides comprehensive database state analysis with error-safe operations:
 
 ```python
-def get_last_indexed_timestamp(server_id: int) -> Optional[str]:
-    collection = db_client.get_collection("messages")
-    
-    # Check collection size first
-    message_count = collection.count()
-    if message_count == 0:
-        return None
-    
-    # Retrieve all metadata to find latest timestamp
-    results = collection.get(include=["metadatas"])
-    
-    # Find most recent timestamp
-    latest_timestamp = None
-    for metadata in results["metadatas"]:
-        if metadata and "timestamp" in metadata:
-            timestamp_str = metadata["timestamp"]
-            if not latest_timestamp or timestamp_str > latest_timestamp:
-                latest_timestamp = timestamp_str
-    
-    return latest_timestamp
+class ResumptionInfo(NamedTuple):
+    """Information about where to resume message processing for a server."""
+    server_id: int
+    last_indexed_timestamp: Optional[str]
+    message_count: int
+    needs_full_processing: bool
+    resumption_recommended: bool
+
+def get_resumption_info(server_id: int) -> ResumptionInfo:
+    """Get comprehensive resumption information with error-safe defaults."""
+    try:
+        # Check if database directory exists first
+        db_path = Path(__file__).parent.parent / "db" / "databases" / str(server_id)
+        if not db_path.exists():
+            return ResumptionInfo(
+                server_id=server_id,
+                last_indexed_timestamp=None,
+                message_count=0,
+                needs_full_processing=True,
+                resumption_recommended=False
+            )
+        
+        # Get ChromaDB client and collection
+        db_client = get_db(server_id)
+        collection = db_client.get_collection("messages")
+        message_count = collection.count()
+        
+        # Get last indexed timestamp
+        results = collection.get(include=["metadatas"])
+        latest_timestamp = None
+        for metadata in results["metadatas"]:
+            if metadata and "timestamp" in metadata:
+                timestamp_str = metadata["timestamp"]
+                if not latest_timestamp or timestamp_str > latest_timestamp:
+                    latest_timestamp = timestamp_str
+        
+        # Determine processing recommendation
+        needs_full = latest_timestamp is None
+        resumption_recommended = latest_timestamp is not None
+        
+        return ResumptionInfo(
+            server_id=server_id,
+            last_indexed_timestamp=latest_timestamp,
+            message_count=message_count,
+            needs_full_processing=needs_full,
+            resumption_recommended=resumption_recommended
+        )
+        
+    except Exception as e:
+        # Default to safe state on any error
+        logger.error(f"Failed to get resumption info for server {server_id}: {e}")
+        return ResumptionInfo(
+            server_id=server_id,
+            last_indexed_timestamp=None,
+            message_count=0,
+            needs_full_processing=True,
+            resumption_recommended=False
+        )
 ```
+
+**Resumption Features:**
+- **Error-Safe Defaults**: Never raises exceptions, returns safe processing states
+- **Comprehensive State Analysis**: Determines full processing vs resumption needs  
+- **Directory Validation**: Checks database existence before operations
+- **Timestamp Validation**: Ensures valid Discord timestamp formats
+- **Performance Optimized**: Efficient metadata queries for large collections
 
 ## SQLite Conversation Persistence
 
@@ -291,61 +449,123 @@ def search_conversation_history(
     """
 ```
 
+## Server Configuration Database
+
+### Configuration Schema
+
+**File**: `src/db/setup_db.py`
+
+A dedicated SQLite database manages server-specific configurations:
+
+```python
+def _initialize_config_db() -> None:
+    """Initialize the SQLite database for server configurations."""
+    with sqlite3.connect(config_db_path) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS server_configs (
+                server_id TEXT PRIMARY KEY,
+                message_processing_error_handling TEXT DEFAULT 'skip',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+def get_server_embedding_model(server_id: int) -> Optional[str]:
+    """Get the configured embedding model for a server."""
+    with get_config_db() as conn:
+        cursor = conn.execute("""
+            SELECT embedding_model_name 
+            FROM server_configs 
+            WHERE server_id = ?
+        """, (str(server_id),))
+        
+        row = cursor.fetchone()
+        if row and row[0] and row[0] != "default":
+            return row[0]
+        return None
+```
+
+**Configuration Features:**
+- **Per-Server Settings**: Custom embedding models, error handling policies
+- **Default Fallbacks**: Graceful handling when configurations are missing
+- **Thread-Safe Operations**: Proper connection management for concurrent access
+- **Configuration Validation**: Ensures valid embedding model selections
+
 ## Database Coordination
 
-### Vector-Conversation Integration
+### Multi-Database Integration
 
-The two database systems work in coordination:
+The three database systems work in coordination:
 
 1. **Message Processing Flow**:
    ```
-   Discord Message � Processing Pipeline � ChromaDB (vector storage)
-                                      � SQLite (conversation history)
+   Discord Message → Processing Pipeline → ChromaDB (vector storage with custom embeddings)
+                                       → SQLite (conversation history)
+                                       ← Server Config DB (embedding model selection)
    ```
 
 2. **Query Flow**:
    ```
-   User Query � ChromaDB (semantic search) � DMAssistant Context
-            � SQLite (conversation history) � Response Generation
+   User Query → ChromaDB (semantic search with BGE models) → DMAssistant Context
+           ← Server Config DB (model configuration)
+           → SQLite (conversation history) → Response Generation
    ```
 
 3. **Data Consistency**:
-   - Both databases use server_id for isolation
+   - All databases use server_id for isolation and coordination
    - Message IDs ensure cross-system referential integrity
-   - Timestamps enable temporal coordination
+   - Timestamps enable temporal coordination across storage systems
+   - Embedding model consistency via configuration database
 
 ### Performance Coordination
 
 **Vector Storage Optimization**:
+- Singleton embedding model instances prevent expensive reloading
+- Custom BGE models provide superior semantic understanding
+- GPU-accelerated embedding generation on RTX 3090 hardware
 - Lazy client initialization reduces memory usage
-- Server-specific collections improve query performance
-- Automatic embedding generation eliminates preprocessing overhead
+- Server-specific collections with custom embedders improve query performance
 
 **Conversation Storage Optimization**:
 - Indexed queries on user_id/server_id combinations
 - Connection pooling with thread safety
-- Configurable retention policies
+- Configurable retention policies via cleanup functions
+
+**Configuration Storage Optimization**:
+- Fast embedding model lookups for collection initialization
+- Minimal database footprint for server settings
+- Cached configuration retrieval for performance
 
 ## Performance Optimization
 
 ### Hardware-Specific Optimizations
 
-The system targets consumer hardware (RTX 3090, 16GB RAM):
+The system targets consumer hardware (RTX 3090, 24GB RAM):
 
-1. **Memory Management**:
-   - Lazy database client loading
-   - Connection-per-query pattern for SQLite
-   - ChromaDB persistent storage minimizes RAM usage
+1. **GPU Memory Management**:
+   - BGE embedding models require CUDA for optimal performance
+   - Singleton pattern prevents multiple model loading (saves GPU memory)
+   - Async embedding generation prevents blocking during model inference
+   - Thread-safe model access for concurrent message processing
 
-2. **Storage Efficiency**:
+2. **System Memory Efficiency**:
+   - Lazy database client loading minimizes RAM usage
+   - Connection-per-query pattern for SQLite operations
+   - ChromaDB persistent storage reduces active memory requirements
+   - Model preloading during startup prevents runtime delays
+
+3. **Storage Efficiency**:
    - Server-isolated databases prevent cross-contamination
-   - Compressed document storage in ChromaDB
-   - Indexed SQLite queries for sub-second retrieval
+   - Compressed document storage in ChromaDB collections
+   - Indexed SQLite queries for sub-second conversation retrieval
+   - Efficient metadata storage with minimal redundancy
 
-3. **Query Performance**:
-   - ChromaDB's optimized vector search algorithms
-   - SQLite LIKE queries with index support
-   - Result limiting to prevent memory overflow
+4. **Query Performance**:
+   - High-quality BGE embeddings improve semantic search accuracy
+   - Custom embedding models tuned for Discord message content
+   - ChromaDB's optimized vector search with cosine similarity
+   - SQLite LIKE queries with strategic index utilization
+   - Result limiting and relevance scoring for optimal user experience
 
 ### Performance Targets
 
@@ -377,25 +597,27 @@ The database architecture supports evolution through:
 
 Planned improvements to the database system:
 
-1. **Image Embeddings**: Integration of vision models for attachment processing
-2. **Advanced Search**: Hybrid semantic-keyword search combining both databases  
-3. **Performance Analytics**: Database usage metrics and optimization insights
-4. **Backup Systems**: Automated backup and recovery mechanisms
+1. **Enhanced Image Processing**: Further optimization of vision model integration for attachment processing
+2. **Advanced Search**: Hybrid semantic-keyword search combining ChromaDB and SQLite capabilities
+3. **Performance Analytics**: Database usage metrics, embedding quality insights, and optimization recommendations
+4. **Backup Systems**: Automated backup and recovery mechanisms for all three database systems
+5. **Model Management**: Dynamic embedding model switching and A/B testing capabilities
+6. **Distributed Storage**: Multi-server deployment support with database sharding
 
 ## Error Handling and Recovery
 
 ### Database Resilience
 
-The system implements comprehensive error handling:
+The system implements comprehensive error handling with specific exception types:
 
 **ChromaDB Operations**:
 ```python
 try:
     collection.add(documents=[content], metadatas=[metadata], ids=[id])
     return True
-except ChromaError as e:
-    logger.error(f"ChromaDB error: {e}")
-    return False
+except (ChromaError, ValueError, TypeError, ConnectionError, OSError, MemoryError) as e:
+    logger.error(f"ChromaDB storage error: {e}")
+    raise DatabaseConnectionError(f"Failed to store message: {e}")
 ```
 
 **SQLite Operations**:
@@ -404,17 +626,33 @@ try:
     with self._get_connection() as conn:
         cursor.execute(query, params)
         conn.commit()
+        return True
 except sqlite3.IntegrityError as e:
-    logger.warning(f"Duplicate message: {e}")
+    logger.warning(f"Duplicate message not inserted: {e}")
+    return False
 except sqlite3.Error as e:
     logger.error(f"Database error: {e}")
+    return False
+```
+
+**Embedding Model Operations**:
+```python
+try:
+    embedder = get_text_embedder(model_name)
+    await embedder._load_model_async()
+except EmbeddingError as e:
+    logger.error(f"Failed to load embedding model: {e}")
+    # Fallback to default ChromaDB embeddings
+    embedder = None
 ```
 
 ### Recovery Mechanisms
 
-1. **Resumption Logic**: Automatic detection of processing state
-2. **Graceful Degradation**: System continues operating with partial failures
-3. **Connection Recovery**: Automatic reconnection on database errors
-4. **Data Validation**: Input validation prevents corruption
+1. **Comprehensive Resumption Logic**: Error-safe processing state detection with detailed ResumptionInfo
+2. **Graceful Degradation**: System continues operating with partial failures, fallback to default embeddings
+3. **Connection Recovery**: Automatic reconnection on database errors with proper cleanup
+4. **Data Validation**: Input validation prevents corruption, timestamp parsing validation
+5. **Model Fallback**: Automatic fallback to ChromaDB default embeddings if custom models fail
+6. **Configuration Resilience**: Safe defaults for missing server configurations
 
-This comprehensive vector database management system provides robust, scalable, and performant storage for Discord message indexing while maintaining data integrity and optimal user experience.
+This comprehensive database management system provides robust, scalable, and performant storage for Discord message indexing with custom embedding model support, image processing integration, and optimal hardware utilization while maintaining data integrity and exceptional user experience.

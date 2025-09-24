@@ -16,12 +16,17 @@ class BotSettings(BaseSettings):
     DISCORD_TOKEN: str                    # Required Discord bot token
     COMMAND_PREFIX: str = "!"             # Bot command prefix (default: "!")
     DEBUG: bool = False                   # Debug mode flag (default: False)
-    TEXT_MODEL_NAME: str                  # Text processing model (aliases: LLM_NAME)
-    VISION_MODEL_NAME: str                # Image processing model (aliases: VLM_NAME)
+    TEXT_MODEL_NAME: str                  # Text processing model
+    VISION_MODEL_NAME: str                # Vision processing model
     LANGCHAIN_VERBOSE: bool = False       # LangChain debug output
-    EMBEDDING_MODEL_NAME: str             # Sentence transformer for embeddings
+    EMBEDDING_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"  # Default embedding model
     
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+    
+    @property
+    def LLM_MODEL_NAME(self) -> str:
+        """Backward compatibility property for TEXT_MODEL_NAME."""
+        return self.TEXT_MODEL_NAME
 ```
 
 **Key Features:**
@@ -66,18 +71,19 @@ LANGCHAIN_VERBOSE=false                  # LangChain debug output
 #### Dual Model Configuration
 ```bash
 # Text processing model (for DMAssistant and LinkAnalyzer)
-LLM_NAME=llama3.2:3b                    # Lightweight text model for conversation and analysis
+TEXT_MODEL_NAME=llama3.2:3b             # Text model for conversation and analysis
 
 # Vision processing model (for image analysis)
-VLM_NAME=minicpm-v                      # Vision-language model for image processing
+VISION_MODEL_NAME=minicpm-v             # Vision-language model for image processing
 
 # Embedding model for vector similarity search
 EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
 ```
 
 **Model Configuration Notes:**
-- **TEXT_MODEL_NAME** (mapped from LLM_NAME): Used by DMAssistant for conversation responses and LinkAnalyzer for web content processing
-- **VISION_MODEL_NAME** (mapped from VLM_NAME): Used by image processing pipeline for analyzing uploaded images and screenshots
+- **TEXT_MODEL_NAME**: Used by DMAssistant for conversation responses and LinkAnalyzer for web content processing
+- **VISION_MODEL_NAME**: Used by image processing pipeline for analyzing uploaded images and screenshots
+- **EMBEDDING_MODEL_NAME**: Used for semantic search with server-specific override capability
 - **Both models load simultaneously at startup** with 30-minute keep-alive to maintain responsiveness
 - **Memory requirement**: Approximately 8-12GB VRAM depending on model sizes
 - **Model availability**: Ollama automatically downloads missing models during initialization
@@ -93,21 +99,17 @@ OLLAMA_HOST=http://localhost:11434       # Custom Ollama host
 The `.env` file follows a structured format with documentation:
 
 ```bash
-# NOT USED CURRENTLY
-# APPLICATION ID: 1407288437911982201
-# PUBLIC KEY: 8f85af9bb6deb5230967db492e93fe069d994cd35c46d52c45bf4a41f17beea2
-
 # Discord Configuration
-DISCORD_TOKEN=your_token_here
+DISCORD_TOKEN=your_discord_bot_token_here
 COMMAND_PREFIX=!
 
 # Development Configuration
 DEBUG=True
 LANGCHAIN_VERBOSE=false
 
-# Model Configuration
-LLM_NAME=llama3.2:3b
-VLM_NAME=minicpm-v
+# Dual Model Configuration
+TEXT_MODEL_NAME=llama3.2:3b
+VISION_MODEL_NAME=minicpm-v
 EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
 ```
 
@@ -149,15 +151,30 @@ trafilatura==2.0.0                      # Web content extraction
 lxml_html_clean                         # HTML cleaning utilities
 ```
 
+#### Machine Learning and Embeddings
+```
+sentence-transformers>=2.2.0            # Text embeddings for semantic search
+torch>=2.0.0                            # PyTorch for ML operations
+torchvision                             # Computer vision utilities
+torchaudio                              # Audio processing utilities
+```
+
+#### Additional Dependencies
+```
+Pillow>=10.0.0                         # Image processing
+requests>=2.31.0                       # HTTP requests
+aiohttp>=3.8.0                         # Async HTTP client
+psutil>=5.9.0                          # System monitoring
+```
+
 ### Python Version Requirements
 
 **Target Version**: Python 3.10.6 (specified in project documentation)
-**Current System**: Python 3.13.1 (detected during analysis)
 
 **Version Compatibility Notes:**
 - Project designed for Python 3.10.6 but compatible with 3.10+
-- Current system Python 3.13.1 may require dependency compatibility testing
-- Virtual environment recommended for version isolation
+- PyTorch CUDA installation requires specific commands (see requirements.txt)
+- Virtual environment recommended for dependency isolation
 
 ### Dependency Installation Process
 
@@ -168,9 +185,17 @@ source venv/Scripts/activate  # Windows Git Bash
 # or
 venv\Scripts\activate.bat     # Windows CMD
 
-# Install dependencies
+# Install CUDA-enabled PyTorch (if GPU available)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+# Install remaining dependencies
 pip install -r requirements.txt
 ```
+
+**CUDA Installation Notes:**
+- The requirements.txt includes CUDA installation instructions
+- GPU support recommended for BGE embedding models
+- CPU-only installation available but significantly slower
 
 ## Security Configuration
 
@@ -211,6 +236,147 @@ def get_intents(self) -> discord.Intents:
 - Conversation data isolated in SQLite databases
 - Log files written to dedicated `logs/` directory with timestamp-based naming
 
+## Server Configuration System
+
+### Overview
+
+The Discord-Indexer implements a comprehensive server-specific configuration system using SQLite storage and in-memory caching. Each Discord server requires configuration before message processing can begin, including error handling preferences and embedding model selection.
+
+### Server Configuration Architecture
+
+#### SQLite Storage Schema
+```sql
+CREATE TABLE IF NOT EXISTS server_configs (
+    server_id TEXT PRIMARY KEY,
+    message_processing_error_handling TEXT DEFAULT 'skip',
+    embedding_model_name TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+```
+
+#### In-Memory Cache System
+```python
+# Global cache of configured server IDs for fast lookup
+_configured_servers: List[str] = []
+
+def load_configured_servers() -> List[str]:
+    """Load all configured server IDs into memory cache."""
+    global _configured_servers
+    with get_config_db() as conn:
+        cursor = conn.execute("SELECT server_id FROM server_configs")
+        _configured_servers = [row[0] for row in cursor.fetchall()]
+    return _configured_servers
+
+def is_server_configured(server_id: str) -> bool:
+    """Check if server is configured using in-memory cache."""
+    return server_id in _configured_servers
+```
+
+### Terminal UI Configuration Process
+
+When unconfigured servers are detected, the system launches an interactive terminal UI:
+
+#### Error Handling Configuration
+```
+🤖 CONFIGURING SERVER: ServerName
+   Server ID: 1234567890
+
+When a message fails to process, should the bot:
+1. Skip that message and continue with others (recommended)
+2. Stop processing and shut down the application
+
+Enter choice for ServerName (1 or 2):
+```
+
+#### Embedding Model Selection
+```
+🧠 EMBEDDING MODEL CONFIGURATION
+Choose the embedding model for semantic search:
+1. Use global default (recommended)
+2. Use BGE-large-en-v1.5 (high accuracy, requires GPU)
+3. Use lightweight model (faster, less accurate)
+4. Custom model name
+
+Enter choice for ServerName (1-4):
+```
+
+### Server Configuration Workflow
+
+#### Startup Configuration
+```python
+# Called during bot startup in on_ready_handler
+def configure_all_servers(guilds) -> bool:
+    """Configure all unconfigured servers at startup."""
+    unconfigured_servers = []
+    
+    # Find servers that need configuration
+    for guild in guilds:
+        server_id = str(guild.id)
+        if not is_server_configured(server_id):
+            unconfigured_servers.append((server_id, guild.name))
+    
+    # Run interactive configuration for each server
+    for server_id, server_name in unconfigured_servers:
+        success = configure_new_server(server_id, server_name)
+        if success:
+            add_server_to_cache(server_id)
+```
+
+#### Runtime Validation
+```python
+# Called before processing any server message
+def ensure_server_configured(server_id: str, server_name: str) -> bool:
+    """Ensure server is configured before processing messages."""
+    if is_server_configured(server_id):
+        return True
+    
+    # Run configuration process if not configured
+    return configure_new_server(server_id, server_name)
+```
+
+### Per-Server Embedding Models
+
+Servers can override the global embedding model setting:
+
+```python
+def get_server_embedding_model(server_id: int) -> Optional[str]:
+    """Get the configured embedding model for a server."""
+    with get_config_db() as conn:
+        cursor = conn.execute(
+            "SELECT embedding_model_name FROM server_configs WHERE server_id = ?",
+            (str(server_id),)
+        )
+        row = cursor.fetchone()
+        if row and row[0] and row[0] != "default":
+            return row[0]
+    return None
+```
+
+### Database Integration
+
+Server configurations integrate with ChromaDB client creation:
+
+```python
+def get_db(server_id: int, embedding_model: Optional[str] = None) -> Client:
+    """Get ChromaDB client with server-specific embedding model."""
+    # Check for server-specific embedding model override
+    if not embedding_model:
+        embedding_model = get_server_embedding_model(server_id)
+    
+    # Create cache key including embedding model
+    cache_key = f"{server_id}_{embedding_model or 'default'}"
+    
+    if cache_key in _clients:
+        return _clients[cache_key]
+    
+    # Create server-specific database with proper embedding model
+    server_db_path = Path(__file__).parent / "databases" / str(server_id) / "chroma_data"
+    client = chromadb.PersistentClient(path=str(server_db_path))
+    _clients[cache_key] = client
+    return client
+```
+
 ## System Validation
 
 ### Database Initialization Validation
@@ -223,7 +389,10 @@ def initialize_db() -> None:
     databases_path = Path(__file__).parent / "databases"
     try:
         databases_path.mkdir(exist_ok=True)
+        # Initialize conversation database
         initialize_conversation_db()
+        # Initialize server configuration database
+        _initialize_config_db()
         logger.info("Database directory structure ready")
     except PermissionError as e:
         logger.error(f"Insufficient permissions: {e}")
@@ -235,14 +404,15 @@ def initialize_db() -> None:
 
 ### Dual Model Validation and Loading
 
-The system implements simultaneous loading and health checking of both text and vision models:
+The system implements simultaneous loading and health checking of both text and vision models via ModelManager:
 
 ```python
 # Dual model manager initialization
 class ModelManager:
     def __init__(self) -> None:
-        self._text_model_name = settings.TEXT_MODEL_NAME    # From LLM_NAME
-        self._vision_model_name = settings.VISION_MODEL_NAME # From VLM_NAME
+        self._text_model_name = settings.TEXT_MODEL_NAME
+        self._vision_model_name = settings.VISION_MODEL_NAME
+        self._models_loaded = False
         self.ensure_models_loaded()  # Load both models simultaneously
 
 # Simultaneous model loading with keep-alive
@@ -251,33 +421,42 @@ def ensure_models_loaded(self) -> None:
     ensure_model_available(self._vision_model_name)
     ensure_model_available(self._text_model_name)
     
-    # Load both models into memory with 30-minute keep-alive
+    # Load vision model into memory first
     client = get_ollama_client()
-    
-    # Vision model first
     client.chat(
         model=self._vision_model_name,
         messages=[{"role": "user", "content": "Hello"}],
         options={"num_predict": 10},
-        keep_alive="30m"  # Prevent unloading
+        keep_alive="30m"
     )
     
-    # Text model second
+    # Load text model into memory second  
     client.chat(
         model=self._text_model_name,
         messages=[{"role": "user", "content": "Hello"}],
         options={"num_predict": 10},
-        keep_alive="30m"  # Prevent unloading
+        keep_alive="30m"
     )
+    
+    self._models_loaded = True
 
-# Health check both models
+# Health check both models with detailed results
 def health_check_both_models(self) -> Dict[str, Any]:
     text_healthy = health_check(self._text_model_name)
     vision_healthy = health_check(self._vision_model_name)
     return {
-        'text_model': {'healthy': text_healthy},
-        'vision_model': {'healthy': vision_healthy},
-        'both_healthy': text_healthy and vision_healthy
+        'text_model': {
+            'healthy': text_healthy,
+            'response_time': text_time,
+            'error': None if text_healthy else f"Text model health check failed"
+        },
+        'vision_model': {
+            'healthy': vision_healthy, 
+            'response_time': vision_time,
+            'error': None if vision_healthy else f"Vision model health check failed"
+        },
+        'both_healthy': text_healthy and vision_healthy,
+        'total_check_time': total_time
     }
 ```
 
@@ -295,21 +474,31 @@ Multi-stage Discord connection validation in `main.py`:
 # Startup validation sequence
 async def main() -> None:
     try:
-        # 1. Database initialization
+        # 1. Database and configuration initialization
         initialize_db()
+        create_config_tables()
         
-        # 2. Bot instance creation  
+        # 2. Load configured servers into memory cache
+        configured_servers = load_configured_servers()
+        
+        # 3. Preload embedding models
+        from src.db.embedders import preload_embedder
+        await preload_embedder("BAAI/bge-large-en-v1.5")
+        
+        # 4. Initialize ModelManager and health check
+        model_manager = ModelManager()
+        health_results = model_manager.health_check_both_models()
+        
+        # 5. Bot instance creation and setup
         bot = DiscordBot()
-        
-        # 3. Event handler setup
         setup_bot_actions(bot)
         
-        # 4. Discord connection
+        # 6. Discord connection
         await bot.start(settings.DISCORD_TOKEN)
         
     except (discord.LoginFailure, discord.HTTPException, 
             discord.ConnectionClosed, ValueError, OSError, 
-            RuntimeError, ChromaError) as e:
+            RuntimeError, ChromaError, ConnectionError, TimeoutError, KeyError) as e:
         logger.error(f"Failed to start bot: {e}")
         raise
 ```
@@ -380,14 +569,14 @@ Target Hardware:
 #### Dual Model Selection Strategy
 ```bash
 # Text processing model - optimized for conversation and analysis
-LLM_NAME=llama3.2:3b                   # Lightweight, fast responses for DMAssistant
-# LLM_NAME=llama3.1:8b                 # Higher quality for complex text analysis
-# LLM_NAME=qwen2.5-coder:32b           # Code-focused tasks (high memory)
+TEXT_MODEL_NAME=llama3.2:3b           # Lightweight, fast responses for DMAssistant
+# TEXT_MODEL_NAME=llama3.1:8b          # Higher quality for complex text analysis
+# TEXT_MODEL_NAME=qwen2.5-coder:32b    # Code-focused tasks (high memory)
 
 # Vision processing model - optimized for image understanding
-VLM_NAME=minicpm-v                     # Balanced vision-language model
-# VLM_NAME=llama3.2-vision:11b         # Alternative vision model
-# VLM_NAME=qwen2.5vl:7b                # Higher quality vision processing
+VISION_MODEL_NAME=minicpm-v           # Balanced vision-language model
+# VISION_MODEL_NAME=llama3.2-vision:11b # Alternative vision model
+# VISION_MODEL_NAME=qwen2.5vl:7b        # Higher quality vision processing
 ```
 
 **Model Selection Considerations:**
@@ -450,8 +639,8 @@ def get_model_max_context(model_name: str) -> int:
    DISCORD_TOKEN=production_token_here
    DEBUG=False
    LANGCHAIN_VERBOSE=false
-   LLM_NAME=llama3.2:3b
-   VLM_NAME=minicpm-v
+   TEXT_MODEL_NAME=llama3.2:3b
+   VISION_MODEL_NAME=minicpm-v
    ```
 
 3. **Database Persistence**
@@ -470,17 +659,20 @@ def get_model_max_context(model_name: str) -> int:
 
 ### Resource Monitoring
 
-- **Memory Usage**: Monitor model loading and ChromaDB memory consumption
-- **Disk Space**: Database growth monitoring for large Discord servers
+- **Memory Usage**: Monitor dual model loading (8-12GB VRAM) and ChromaDB memory consumption
+- **Disk Space**: Database growth monitoring for large Discord servers (per-server ChromaDB + SQLite)
 - **Network**: Discord API rate limiting and connection monitoring
-- **GPU Utilization**: Local LLM inference monitoring
+- **GPU Utilization**: Local LLM inference monitoring for both text and vision models
+- **Configuration Database**: Monitor server_configs.db growth and conversation history
 
 ### Scalability Considerations
 
-- **Server-Specific Databases**: Isolated databases per Discord server prevent cross-contamination
-- **Lazy Loading**: Database clients created on-demand to minimize memory footprint
+- **Server-Specific Databases**: Isolated ChromaDB databases per Discord server prevent cross-contamination
+- **Server Configuration Cache**: In-memory cache for fast server configuration validation
+- **Lazy Loading**: Database clients created on-demand with embedding model-specific caching
 - **Batch Processing**: Rate-limited parallel message fetching for large historical imports
 - **Model Caching**: Context window and model metadata caching to reduce overhead
+- **Per-Server Embedding Models**: Override global embedding model on a per-server basis
 
 ## Troubleshooting Common Issues
 
@@ -496,7 +688,7 @@ def get_model_max_context(model_name: str) -> int:
    ```
    Error: Text model not found in Ollama
    Solution: Check available models with `ollama list`
-   Verify both LLM_NAME and VLM_NAME are correct
+   Verify both TEXT_MODEL_NAME and VISION_MODEL_NAME are correct
    ```
    
 3. **Insufficient VRAM for Dual Models**
@@ -506,7 +698,14 @@ def get_model_max_context(model_name: str) -> int:
    Consider llama3.2:1b for text or lighter vision models
    ```
 
-3. **Database Permission Errors**
+4. **Server Configuration Issues**
+   ```
+   Error: Server not configured for message processing
+   Solution: Ensure configure_all_servers() runs at startup
+   Check server_configs.db for missing entries
+   ```
+   
+5. **Database Permission Errors**
    ```
    Error: PermissionError on database directory creation
    Solution: Ensure write permissions in project directory
@@ -517,8 +716,8 @@ def get_model_max_context(model_name: str) -> int:
 1. **Python Version Compatibility**
    ```
    Target: Python 3.10.6
-   Current: Python 3.13.1
-   Action: Test compatibility or use pyenv for version management
+   Action: Use virtual environment for isolation
+   Verify PyTorch CUDA installation if using GPU
    ```
 
 2. **Dependency Conflicts**

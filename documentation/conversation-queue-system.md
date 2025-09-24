@@ -8,7 +8,7 @@ The Discord-Indexer conversation queue system provides stateless, fair, and scal
 
 ### Core Components
 
-#### 1. ConversationQueue (`src/llm/agents/conversation_queue.py`)
+#### 1. ConversationQueue (`src/ai/agents/conversation_queue.py`)
 The central queue management system that handles:
 - **Thread-safe request queuing** using `asyncio.Queue`
 - **Anti-spam protection** preventing multiple concurrent requests per user
@@ -16,13 +16,14 @@ The central queue management system that handles:
 - **Queue capacity management** with configurable limits
 - **Position tracking** for user queue visibility
 
-#### 2. ConversationQueueWorker (`src/llm/agents/queue_worker.py`)
+#### 2. ConversationQueueWorker (`src/ai/agents/queue_worker.py`)
 The worker process that processes queued requests:
 - **Async worker loop** for continuous request processing
 - **LangChain integration** using `LangChainDMAssistant` for LLM processing
 - **Timeout handling** with 60-second request limits
 - **Error recovery** with user notifications
-- **Stateless processing** without conversation persistence
+- **Database logging** with conversation history persistence via `ConversationDB`
+- **Dual assistant support** (LangChain default, legacy DMAssistant fallback)
 
 #### 3. Request Data Structure (`ConversationRequest`)
 Each conversation request contains:
@@ -112,19 +113,26 @@ response = await asyncio.wait_for(
 )
 ```
 
-#### 4. Response Delivery
+#### 4. Database Logging
+- **User message logging**: Messages logged to ConversationDB before processing
+- **Response logging**: AI responses logged after successful generation
+- **Error logging**: Timeout and error responses also logged for consistency
+- **Server context**: Uses effective server ID ("0" for DMs, actual server ID otherwise)
+
+#### 5. Response Delivery
 - **Discord channel integration**: Send responses directly to user DMs
 - **Error handling**: Timeout and processing error notifications
 - **Request completion**: Clean up tracking and update statistics
 
 ## Conversation Flow Control
 
-### Stateless Processing Model
-The system operates without persistent conversation sessions:
+### Stateless Processing with Database Persistence
+The system operates without persistent conversation sessions but maintains conversation history:
 
-#### Independent Request Processing
-- **No conversation history persistence**: Each request processed independently
-- **Context through database**: Historical context retrieved per-request from ChromaDB
+#### Independent Request Processing with Database Logging
+- **Stateless request processing**: Each request processed independently without sessions
+- **Conversation history logging**: Both user messages and AI responses are logged to `ConversationDB`
+- **Context through database**: Historical context retrieved per-request from both ChromaDB (indexed messages) and ConversationDB (conversation history)
 - **Fair resource usage**: No long-running sessions consuming resources
 
 #### Server Selection Integration
@@ -183,7 +191,7 @@ The system migrated from persistent sessions to stateless processing:
 - **Simplified error handling** without session state corruption
 
 ### Session Manager Deprecation
-The `SessionManager` class (`src/llm/agents/session_manager.py`) is marked as deprecated:
+The `SessionManager` class (`src/ai/agents/session_manager.py`) is marked as deprecated:
 - **� DEPRECATED**: No longer used in Phase 1 implementation
 - **Compatibility preservation**: Kept for potential rollback scenarios
 - **Future removal**: Will be removed in subsequent versions
@@ -198,7 +206,7 @@ The `SessionManager` class (`src/llm/agents/session_manager.py`) is marked as de
 from src.ai.agents.queue_worker import initialize_queue_worker
 queue_worker = initialize_queue_worker(use_langchain=True)
 await queue_worker.start()
-bot.queue_worker = queue_worker
+bot.queue_worker = queue_worker  # Store reference for cleanup
 ```
 
 #### Command Handler Integration
@@ -206,10 +214,20 @@ bot.queue_worker = queue_worker
 @bot.command(name='ask')
 async def ask_command(ctx: commands.Context, *, message: str = None):
     """Ask the DMAssistant a question (stateless queue-based processing)."""
+    # Import queue system
+    queue = get_conversation_queue()
+    user_id = str(ctx.author.id)
+    
+    # Check if user already has a request queued
+    if queue.is_user_queued(user_id):
+        position = queue.get_queue_position(user_id)
+        await ctx.send(f"You already have a request in queue (position: {position})")
+        return
+    
     # Server selection and validation logic
     # Queue request submission
     success = await queue.add_request(
-        user_id=str(ctx.author.id),
+        user_id=user_id,
         server_id=selected_server.server_id,
         message=actual_message,
         discord_channel=ctx.channel
@@ -225,12 +243,32 @@ The queue worker integrates with `LangChainDMAssistant`:
 - **Server-specific context**: Each request includes target server information
 - **Error propagation**: LLM errors handled and communicated to users
 
-#### Response Generation Flow
+#### Response Generation Flow with Database Persistence
 1. **Queue retrieval**: Worker gets next request from queue
-2. **LLM invocation**: LangChain agent processes user message
-3. **Tool execution**: Search tools access ChromaDB for context
-4. **Response generation**: LLM generates contextual response
-5. **Discord delivery**: Response sent to user's DM channel
+2. **User message logging**: Log user message to ConversationDB before processing
+3. **LLM invocation**: LangChain agent processes user message with timeout (60s)
+4. **Tool execution**: Search tools access both ChromaDB (indexed messages) and ConversationDB (conversation history)
+5. **Response generation**: LLM generates contextual response
+6. **Response logging**: Log AI response to ConversationDB after generation
+7. **Discord delivery**: Response sent to user's DM channel
+8. **Error handling**: Timeouts and errors also logged to database with appropriate error messages
+
+#### Database Integration Details
+```python
+async def _log_conversation_message(self, user_id: str, server_id: str, role: str, content: str):
+    """Log conversation message to database."""
+    from src.db.conversation_db import get_conversation_db
+    
+    conv_db = get_conversation_db()
+    effective_server_id = server_id if server_id else "0"  # Use "0" for DM contexts
+    
+    success = conv_db.add_message(
+        user_id=user_id,
+        server_id=effective_server_id,
+        role=role,  # "user" or "assistant"
+        content=content
+    )
+```
 
 ## Error Handling & Recovery
 
@@ -262,13 +300,31 @@ except asyncio.TimeoutError:
 
 #### Processing Errors
 ```python
-except Exception as e:
+except (RuntimeError, ValueError, TypeError, AttributeError, ConnectionError, ImportError) as e:
     logger.error(f"Error processing request for user {request.user_id}: {e}")
-    if request.discord_channel:
-        await request.discord_channel.send(
-            "L **Processing Error**: Something went wrong while processing your request. "
-            "Please try again later."
+    
+    # Log the user message if not already logged
+    if not user_message_logged:
+        await self._log_conversation_message(
+            user_id=request.user_id,
+            server_id=request.server_id,
+            role="user",
+            content=request.message
         )
+    
+    # Log the error as an assistant response
+    error_response = "❌ **Processing Error**: Something went wrong while processing your request. Please try again later."
+    await self._log_conversation_message(
+        user_id=request.user_id,
+        server_id=request.server_id,
+        role="assistant",
+        content=error_response
+    )
+    
+    # Notify user of error
+    if request.discord_channel:
+        await request.discord_channel.send(error_response)
+    
     return False
 ```
 
@@ -316,10 +372,72 @@ class ConversationQueueWorker:
 
 ### Global Instance Management
 Both queue and worker use singleton patterns with explicit initialization:
+
+#### Queue Singleton Pattern
 ```python
+# Global queue instance
+_conversation_queue: Optional[ConversationQueue] = None
+
+def get_conversation_queue() -> ConversationQueue:
+    """Get the global conversation queue instance."""
+    global _conversation_queue
+    if _conversation_queue is None:
+        _conversation_queue = ConversationQueue()
+    return _conversation_queue
+
 def initialize_conversation_queue(max_queue_size: int = 50, request_timeout: int = 300):
-def initialize_queue_worker(dm_assistant=None, use_langchain: bool = True):
+    """Initialize the conversation queue explicitly."""
+    global _conversation_queue
+    if _conversation_queue is None:
+        _conversation_queue = ConversationQueue(max_queue_size, request_timeout)
 ```
+
+#### Worker Singleton Pattern
+```python
+# Global worker instance  
+_queue_worker: Optional[ConversationQueueWorker] = None
+
+def get_queue_worker() -> Optional[ConversationQueueWorker]:
+    """Get the global queue worker instance."""
+    return _queue_worker
+
+def initialize_queue_worker(dm_assistant=None, use_langchain: bool = True):
+    """Initialize the global queue worker."""
+    global _queue_worker
+    if _queue_worker is None:
+        _queue_worker = ConversationQueueWorker(dm_assistant, use_langchain)
+    return _queue_worker
+```
+
+## Real-Time Status Updates
+
+### Discord Message Status System
+The queue system provides real-time status updates to users through Discord message editing:
+
+#### Status Message Management
+```python
+async def update_request_status(self, request: ConversationRequest, status_text: str):
+    """Update the status message for a request."""
+    if request.status_message_id:
+        # Edit existing status message
+        try:
+            status_message = await request.discord_channel.fetch_message(request.status_message_id)
+            await status_message.edit(content=status_text)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            # If editing fails, send new message
+            new_message = await request.discord_channel.send(status_text)
+            request.status_message_id = new_message.id
+    else:
+        # Send new status message
+        new_message = await request.discord_channel.send(status_text)
+        request.status_message_id = new_message.id
+```
+
+#### Status Message Flow
+1. **Queue submission**: Initial status message created and ID stored
+2. **Processing start**: Message edited to show "🤖 **Processing your request...**"  
+3. **Completion**: Final response sent as separate message
+4. **Error handling**: Status message updated with error information
 
 ## Best Practices and Recommendations
 

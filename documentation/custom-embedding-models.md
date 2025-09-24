@@ -35,11 +35,12 @@ Standalone module providing custom embedding functionality with ChromaDB integra
 New `get_collection()` function providing centralized collection management with optimized embedder reuse.
 
 **Features:**
-- Server-specific embedding model detection
-- Singleton embedder access with automatic reuse
-- Custom embedder initialization with error handling
-- Graceful fallback to default ChromaDB embeddings
+- Server-specific embedding model detection via `get_server_embedding_model()`
+- Singleton embedder access with automatic reuse  
+- Custom embedder initialization with `EmbeddingError` handling
+- Graceful fallback to default ChromaDB embeddings on any failure
 - Zero-cost embedder reuse across multiple collection calls
+- Thread-safe collection access with optimized model loading
 
 #### 3. Server Configuration System (`src/setup/server_setup.py`)
 Extended terminal UI for embedding model selection during server setup.
@@ -107,16 +108,18 @@ CREATE TABLE server_configs (
 - CUDA runtime libraries (bundled with PyTorch)
 
 ### CUDA Detection
-The system automatically detects CUDA availability:
+The system automatically detects CUDA availability and enforces GPU requirement for BGE models:
 
 ```python
 if torch.cuda.is_available():
     self.device = "cuda"
-    logger.info(f"CUDA available, using GPU for {model_name}")
+    logger.debug(f"CUDA available, using GPU for {model_name}")
 else:
     logger.error(f"CUDA not available but required for {model_name}")
-    raise RuntimeError("BGE-large-en-v1.5 requires GPU but CUDA is not available")
+    raise EmbeddingError("BGE-large-en-v1.5 requires GPU but CUDA is not available")
 ```
+
+**Important**: The BGE-large-en-v1.5 model strictly requires GPU/CUDA. If CUDA is not available, the system raises an `EmbeddingError` rather than falling back to CPU, ensuring consistent high-performance operation.
 
 ## Startup Optimization
 
@@ -193,15 +196,23 @@ The embedding system integrates automatically with existing message processing:
 ### Manual Configuration
 
 ```python
-from src.db.embedders.text_embedder import get_text_embedder
+from src.db.embedders.text_embedder import get_text_embedder, preload_embedder
 from src.message_processing.storage import get_collection
 
-# Get embedder instance
+# Preload model asynchronously (recommended for startup)
+await preload_embedder("BAAI/bge-large-en-v1.5")
+
+# Get embedder instance (will reuse preloaded singleton)
 embedder = get_text_embedder("BAAI/bge-large-en-v1.5")
 
-# Get collection with custom embedder
+# Get collection - automatic server-specific embedder detection
+collection = get_collection(server_id, "messages")
+
+# Or use explicit custom embedder
 collection = get_collection(server_id, "messages", custom_embedder=embedder)
 ```
+
+**Note**: The `get_collection()` function automatically detects and uses the configured embedding model for each server, eliminating the need to manually specify embedders in most cases.
 
 ## Performance Characteristics
 
@@ -224,25 +235,30 @@ collection = get_collection(server_id, "messages", custom_embedder=embedder)
 ## Error Handling & Fallbacks
 
 ### GPU Unavailable
-When CUDA is not detected:
+When CUDA is not detected for BGE models:
 
 ```
-WARNING - Failed to load custom embedder BAAI/bge-large-en-v1.5: Could not create embedder: BGE-large-en-v1.5 requires GPU but CUDA is not available
+WARNING - Failed to load custom embedder BAAI/bge-large-en-v1.5: EmbeddingError: BGE-large-en-v1.5 requires GPU but CUDA is not available
 INFO - Falling back to default embedder for server 1234567890
 ```
+
+The system gracefully falls back to ChromaDB's default embedding function when custom models fail to load, ensuring continued operation.
 
 ### Model Loading Failures
 When model download/loading fails:
 
 ```python
 try:
+    # Use singleton embedder to prevent multiple model loading
     embedder = get_text_embedder(server_embedding_model)
-    logger.info(f"Using custom embedder {server_embedding_model} for server {server_id}")
-except RuntimeError as e:
+    logger.debug(f"Using singleton embedder {server_embedding_model} for server {server_id}")
+except EmbeddingError as e:
     logger.warning(f"Failed to load custom embedder {server_embedding_model}: {e}")
     logger.info(f"Falling back to default embedder for server {server_id}")
     embedder = None
 ```
+
+**Note**: The actual implementation catches `EmbeddingError` (not `RuntimeError`) and uses `logger.debug()` for successful loads to reduce log verbosity during normal operation.
 
 ### Backward Compatibility
 - Existing servers continue using default embeddings
@@ -281,10 +297,15 @@ except RuntimeError as e:
 **Symptoms:** Multiple "Loading BAAI/bge-large-en-v1.5" log entries, Discord heartbeat timeouts
 
 **Solution:** 
-This issue is resolved with the singleton pattern implementation. If still experiencing:
+This issue is resolved with the singleton pattern implementation (commit `0da47f2`). The singleton pattern ensures:
+- Each model is loaded only once per application lifecycle
+- Log messages show "singleton instance" for proper caching
+- Reused instances show "Reusing existing singleton embedder instance"
+
+If still experiencing issues:
 - Verify you're using the latest code with singleton pattern
-- Check logs for "singleton instance" messages indicating proper caching
-- Use `get_loaded_models()` to verify only one instance is loaded
+- Check logs for "singleton instance" messages indicating proper caching  
+- Use `get_loaded_models()` to verify only one instance is loaded per model
 
 ### Diagnostic Commands
 
@@ -328,7 +349,8 @@ python -c "import asyncio; from src.db.embedders import preload_embedder; asynci
 ## Implementation Reference
 
 **Original Commit**: `21323de` - feat: implement custom BGE-large-en-v1.5 embedding model with GPU support
-**Optimization Commit**: [Current] - fix: implement singleton pattern for BGE model to prevent Discord heartbeat blocking
+**Optimization Commit**: `0da47f2` - feat: optimize BGE embedding system with singleton pattern and async preloading  
+**Documentation Commit**: `def4dbf` - docs: comprehensive documentation update for dual model system and custom embeddings
 
 **Key Files:**
 - `src/db/embedders/text_embedder.py` - Core embedding implementation with singleton pattern

@@ -2,35 +2,39 @@
 
 ## Overview
 
-The Discord Message Processing Pipeline is the core system responsible for transforming raw Discord messages into searchable, indexed content stored in ChromaDB. The pipeline orchestrates a multi-stage workflow that handles content extraction, metadata processing, link analysis, and vector storage while maintaining processing state for resumption capabilities.
+The Discord Message Processing Pipeline is the core system responsible for transforming raw Discord messages into searchable, indexed content stored in ChromaDB. The pipeline orchestrates a multi-stage workflow that handles content extraction, metadata processing, link analysis, image processing, and vector storage while maintaining processing state for resumption capabilities.
 
 ## Architecture Overview
 
 The pipeline follows a modular architecture with clear separation of concerns:
 
 ```
-Raw Discord Messages � MessagePipeline � ChromaDB Storage
-                          �
+Raw Discord Messages → MessagePipeline → ChromaDB Storage
+                          │
                     [Content Analysis]
-                          �
+                          │
                     [Metadata Processing]
-                          �
+                          │
                     [URL Extraction & Scraping]
-                          �
-                    [Embedding Generation]
-                          �
-                    [Database Storage]
+                          │  
+                    [Image Processing & Description]
+                          │
+                    [Embedding Generation (BGE/Custom)]
+                          │
+                    [Database Storage with Automatic Vectors]
 ```
 
 ### Core Components
 
-- **MessagePipeline** (`processor.py`) - Main orchestrator coordinating all processing stages
-- **Content Extraction** (`extraction.py`) - URL and mention extraction with link analysis
-- **Metadata Processing** (`metadata.py`) - Discord message metadata normalization
+- **MessagePipeline** (`processor.py`) - Main orchestrator coordinating all processing stages with async support
+- **Content Extraction** (`extraction.py`) - URL and mention extraction with LLM-powered link analysis
+- **Metadata Processing** (`metadata.py`) - Discord message metadata normalization  
 - **Web Scraping** (`scraper.py`) - Content extraction from URLs using Trafilatura
+- **Image Processing** (`image_processor.py`) - Vision model-based image description generation
 - **Resumption System** (`resumption.py`) - Processing state management and recovery
-- **Storage Interface** (`storage.py`) - ChromaDB integration with automatic embeddings
-- **Embedding Processing** (`embedding.py`) - Image attachment handling (text handled by ChromaDB)
+- **Storage Interface** (`storage.py`) - ChromaDB integration with singleton embedding optimization
+- **Embedding Processing** (`embedding.py`) - Dual model system coordination (text + vision)
+- **Text Embedder** (`db/embedders/text_embedder.py`) - BGE-large-en-v1.5 singleton implementation
 
 ## Processing Stages
 
@@ -107,29 +111,55 @@ Extracts Discord-specific mentions using regex patterns:
 - User mentions: `<@!?(\d+)>`
 - Channel mentions: `<#(\d+)>`
 
-### Stage 5: Embedding Preparation
+### Stage 5: Image Processing and Description Generation
 
-The pipeline prepares content for vector embedding:
+When image attachments are detected, the pipeline processes them through a dedicated vision model:
 
-#### Text Content Combination
+#### Image Download and Validation
+- Downloads images from Discord CDN URLs asynchronously
+- Validates image format (JPEG, PNG, GIF, BMP, WEBP supported)
+- Implements size limits (10MB maximum) and timeout handling
+
+#### Vision Model Processing
+- Uses dedicated vision model (configurable via `VISION_MODEL_NAME` setting)
+- Generates text descriptions through ImageAnalyzer agent
+- Processes multiple images with numbered descriptions
+- Integrates descriptions into document content for embedding
+
+#### Error Handling
+- Graceful handling of download failures, unsupported formats, or processing errors
+- Failed images logged but don't block message processing
+
+### Stage 6: Embedding Generation
+
+The pipeline uses a dual embedding model system with singleton optimization:
+
+#### BGE Text Embedding
+- Uses BGE-large-en-v1.5 model via sentence-transformers
+- Singleton pattern prevents multiple model loading
+- GPU-accelerated processing with CUDA requirement
+- Async support for non-blocking embedding generation
+- Automatic normalization for cosine similarity
+
+#### Custom Embedding Support
+- Per-server embedding model configuration
+- Falls back to default ChromaDB embeddings if custom model fails
+- Supports multiple sentence-transformer models
+
+#### Content Combination for Embedding
 - Original message content
-- Link summaries (if any) combined with double newlines
-- Mention metadata preserved separately
+- Link summaries (if any) combined with double newlines  
+- Image descriptions formatted as "Image description: [text]"
+- All content combined into single document for vector embedding
 
-#### Automatic Embedding
-ChromaDB automatically generates vector embeddings during document storage, eliminating the need for manual embedding generation.
+### Stage 7: Database Storage
 
-#### Image Attachment Handling
-Image embeddings are prepared but not currently implemented (placeholder system in place).
-
-### Stage 6: Database Storage
-
-Final processed data is stored in ChromaDB:
+Final processed data is stored in ChromaDB with optimal embedding reuse:
 
 #### Document Structure
 ```python
 {
-    "documents": [combined_text_content],
+    "documents": [combined_text_content],  # Original message + link summaries + image descriptions
     "metadatas": [normalized_metadata],
     "ids": [f"msg_{message_id}"]
 }
@@ -139,7 +169,43 @@ Final processed data is stored in ChromaDB:
 - Message identifiers (message_id, author_id, channel_id, guild_id)
 - Human-readable names (author_name, author_display_name, author_global_name, author_nick, channel_name, guild_name)
 - Temporal data (timestamp)
-- Processing flags (urls_found, has_link_summaries)
+- Processing flags (urls_found, has_link_summaries, images_processed, has_image_descriptions)
+- Model information (image_processing_model for vision model tracking)
+
+#### Singleton Embedding Optimization
+- Per-server custom embedding models with singleton instances
+- Prevents expensive model reloading during batch processing
+- Thread-safe model access with double-check locking
+- Automatic fallback to default ChromaDB embeddings
+
+## Dual Model Configuration System
+
+The pipeline implements a sophisticated dual model system supporting separate text and vision models:
+
+### Model Configuration
+- **Text Model** (`TEXT_MODEL_NAME` setting): Handles LLM processing for link analysis and content summarization  
+- **Vision Model** (`VISION_MODEL_NAME` setting): Dedicated model for image description generation
+- **Embedding Model** (`EMBEDDING_MODEL_NAME` setting): Configurable per-server text embedding models
+
+### Model Management
+- **ModelManager**: Centralized model loading and coordination
+- **Singleton Pattern**: Prevents duplicate model loading across components
+- **Async Support**: Non-blocking model operations for performance
+- **GPU Optimization**: CUDA acceleration for BGE embedding models
+
+### Configuration Examples
+```python
+# Environment settings
+TEXT_MODEL_NAME = "llama3.2:3b"
+VISION_MODEL_NAME = "llava:7b" 
+EMBEDDING_MODEL_NAME = "BAAI/bge-large-en-v1.5"
+```
+
+### Processing Flow
+1. **Image Processing**: Vision model generates text descriptions
+2. **Link Analysis**: Text model summarizes web content
+3. **Content Embedding**: Embedding model creates vectors for search
+4. **Storage**: All content stored with automatic ChromaDB embeddings
 
 ## Content Extraction System
 
@@ -283,19 +349,26 @@ Comprehensive error handling ensures robust resumption:
 
 ### Multi-Level Error Handling
 
-The pipeline implements layered error handling:
+The pipeline implements layered error handling with configurable strategies:
+
+#### Configurable Error Handling Strategy
+- Per-server `message_processing_error_handling` configuration
+- **'skip' mode**: Continue processing remaining messages on errors (default)
+- **'stop' mode**: Halt processing for server on first error
+- Applied to database, LLM, and general processing errors
 
 #### Message-Level Errors
-- Individual message processing failures don't stop batch processing
+- Individual message processing failures managed by error handling strategy
 - Failed messages logged with detailed error information
 - Processing statistics maintained (success/failure counts)
+- Error-specific exception handling (DatabaseConnectionError, LLMProcessingError, MessageProcessingError)
 
 #### Server-Level Errors
 - Database access errors isolated to specific servers
 - Collection creation failures handled with retries
-- Server processing continues even with individual failures
+- Server processing strategy determines continuation behavior
 
-#### Pipeline-Level Errors
+#### Pipeline-Level Errors  
 - Critical errors logged but don't crash the system
 - Graceful degradation when components are unavailable
 - Clean shutdown on unrecoverable errors
@@ -388,14 +461,20 @@ Optimized data storage:
 - ChromaDB 1.0.20 for vector storage
 - Trafilatura for web content extraction
 - Local LLM via Ollama for content analysis
+- PyTorch with CUDA for BGE embeddings
+- sentence-transformers for custom embedding models
+- Pillow (PIL) for image processing
+- aiohttp for async image downloads
 
 ### Processing Parameters
 
 Configurable through environment:
-- Database path configuration
-- LLM model selection
-- Processing batch sizes
-- Timeout values for external requests
+- **TEXT_MODEL_NAME**: Ollama model for link analysis (e.g., "llama3.2:3b")
+- **VISION_MODEL_NAME**: Ollama vision model for images (e.g., "llava:7b")  
+- **EMBEDDING_MODEL_NAME**: Default embedding model (e.g., "BAAI/bge-large-en-v1.5")
+- Database path configuration per server
+- Processing batch sizes and timeout values
+- Error handling strategies per server
 
 ### Monitoring Integration
 
@@ -405,4 +484,4 @@ Built-in monitoring capabilities:
 - Error rate tracking
 - Performance metric collection
 
-This comprehensive pipeline ensures reliable, scalable processing of Discord message history while maintaining data integrity and providing robust error recovery capabilities.
+This comprehensive pipeline ensures reliable, scalable processing of Discord message history with advanced image processing, dual model coordination, singleton optimization, and configurable error handling while maintaining data integrity and providing robust error recovery capabilities.
