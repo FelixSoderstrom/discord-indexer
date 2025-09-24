@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 def get_collection(server_id: int, collection_name: str = "messages", custom_embedder: Optional[EmbeddingFunction] = None):
-    """Get or create a ChromaDB collection with optional custom embedder.
+    """Get or create a ChromaDB collection with optimal embedder reuse.
+    
+    This function uses singleton embedders to prevent multiple model loading
+    for the same embedding model. Each unique model is loaded once and reused.
     
     Args:
         server_id: Discord server/guild ID
@@ -41,8 +44,9 @@ def get_collection(server_id: int, collection_name: str = "messages", custom_emb
         embedder = custom_embedder
         if embedder is None and server_embedding_model:
             try:
+                # Use singleton embedder to prevent multiple model loading
                 embedder = get_text_embedder(server_embedding_model)
-                logger.info(f"Using custom embedder {server_embedding_model} for server {server_id}")
+                logger.debug(f"Using singleton embedder {server_embedding_model} for server {server_id}")
             except RuntimeError as e:
                 logger.warning(f"Failed to load custom embedder {server_embedding_model}: {e}")
                 logger.info(f"Falling back to default embedder for server {server_id}")
@@ -82,6 +86,7 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
     # Extract components
     metadata = processed_data.get('metadata', {})
     extractions = processed_data.get('extractions', {})
+    embeddings = processed_data.get('embeddings', {})
     
     message_metadata = metadata.get('message_metadata', {})
     guild_metadata = metadata.get('guild_metadata', {})
@@ -103,7 +108,7 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
         # Get collection with configured embedding model
         collection = get_collection(server_id, "messages")
         
-        # Prepare document content (message text + link summaries)
+        # Prepare document content (message text + link summaries + image descriptions)
         document_content = message_metadata.get('content', '')
         
         # Add link summaries if available
@@ -113,6 +118,17 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
                 document_content = f"{document_content}\n\n{link_summaries}"
             else:
                 document_content = link_summaries
+        
+        # Add image descriptions if available
+        if embeddings and embeddings.get('image_descriptions'):
+            image_descriptions = embeddings['image_descriptions']
+            if document_content:
+                document_content = f"Discord message: {document_content}\nImage description: {image_descriptions}"
+            else:
+                document_content = f"Image description: {image_descriptions}"
+        elif document_content:
+            # Format as Discord message even without images for consistency
+            document_content = f"Discord message: {document_content}"
         
         # Skip empty messages
         if not document_content.strip():
@@ -140,6 +156,15 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
             chroma_metadata.update({
                 'urls_found': extraction_meta.get('urls_found', 0),
                 'has_link_summaries': bool(extractions.get('link_summaries_combined'))
+            })
+        
+        # Add image processing metadata if available
+        if embeddings:
+            embedding_meta = embeddings.get('embedding_metadata', {})
+            chroma_metadata.update({
+                'images_processed': embedding_meta.get('images_processed', 0),
+                'has_image_descriptions': bool(embeddings.get('image_descriptions')),
+                'image_processing_model': embedding_meta.get('processing_model', '')
             })
         
         # Store in ChromaDB (embeddings generated automatically)

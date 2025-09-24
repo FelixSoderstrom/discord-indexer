@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Any, Optional, List
 from collections import defaultdict
 
-from src.message_processing.embedding import process_message_embeddings
+from src.message_processing.embedding import process_message_embeddings, process_message_embeddings_async, store_message_embeddings_async
 from src.message_processing.extraction import process_message_extractions
 from src.message_processing.metadata import process_message_metadata
 from src.message_processing.storage import store_complete_message
@@ -102,7 +102,7 @@ class MessagePipeline:
         # Process embeddings if there's text or images
         if content_analysis['has_text'] or content_analysis['has_images']:
             logger.info("Processing message embeddings")
-            processed_data['embeddings'] = process_message_embeddings(message_data, extractions)
+            processed_data['embeddings'] = await process_message_embeddings_async(message_data, extractions)
         
         processed_data['processing_status'] = 'completed'
         return processed_data
@@ -260,6 +260,26 @@ class MessagePipeline:
             self.completion_event.set()
         
         return True
+
+    async def process_message_async(self, message_data: dict) -> None:
+        """Process Discord message asynchronously with all blocking operations moved off event loop."""
+        try:
+            # Process images asynchronously if present
+            if message_data.get('attachments'):
+                image_attachments = [att['url'] for att in message_data['attachments'] if att.get('content_type', '').startswith('image/')]
+                if image_attachments:
+                    from src.message_processing.image_processor import process_message_images
+                    image_descriptions = await process_message_images(image_attachments)
+                    message_data['image_descriptions'] = image_descriptions
+            
+            # Process embeddings asynchronously
+            await store_message_embeddings_async(message_data)
+            
+            logger.info(f"Successfully processed message {message_data.get('id', 'unknown')}")
+            
+        except Exception as e:
+            logger.error(f"Failed to process message: {e}")
+            raise
                 
 
     
@@ -274,3 +294,24 @@ class MessagePipeline:
             'messages_failed': self.messages_failed,
             'success_rate': self.messages_processed / max(1, self.messages_processed + self.messages_failed)
         }
+
+
+async def process_message_async(message_data: dict) -> None:
+    """Process Discord message asynchronously with all blocking operations moved off event loop."""
+    try:
+        # Process images asynchronously if present
+        if message_data.get('attachments'):
+            image_attachments = [att['url'] for att in message_data['attachments'] if att.get('content_type', '').startswith('image/')]
+            if image_attachments:
+                from src.message_processing.image_processor import process_message_images
+                image_descriptions = await process_message_images(image_attachments)
+                message_data['image_descriptions'] = image_descriptions
+        
+        # Process embeddings asynchronously
+        await store_message_embeddings_async(message_data)
+        
+        logger.info(f"Successfully processed message {message_data.get('id', 'unknown')}")
+        
+    except Exception as e:
+        logger.error(f"Failed to process message: {e}")
+        raise
