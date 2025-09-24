@@ -29,14 +29,14 @@ Each conversation request contains:
 - **User identification** (`user_id`, `server_id`)
 - **Message content** and processing timestamp
 - **Discord integration** (`discord_message_id`, `discord_channel`)
-- **Status tracking** (QUEUED ’ PROCESSING ’ COMPLETED/FAILED)
+- **Status tracking** (QUEUED ï¿½ PROCESSING ï¿½ COMPLETED/FAILED)
 - **Optional status message ID** for real-time updates
 
 ## Queue Architecture Overview
 
 ### Request Flow
 ```
-Discord !ask Command ’ ConversationQueue ’ ConversationQueueWorker ’ LangChain Agent ’ Discord Response
+Discord !ask Command ï¿½ ConversationQueue ï¿½ ConversationQueueWorker ï¿½ LangChain Agent ï¿½ Discord Response
 ```
 
 ### Queue States
@@ -184,7 +184,7 @@ The system migrated from persistent sessions to stateless processing:
 
 ### Session Manager Deprecation
 The `SessionManager` class (`src/llm/agents/session_manager.py`) is marked as deprecated:
-- **  DEPRECATED**: No longer used in Phase 1 implementation
+- **ï¿½ DEPRECATED**: No longer used in Phase 1 implementation
 - **Compatibility preservation**: Kept for potential rollback scenarios
 - **Future removal**: Will be removed in subsequent versions
 
@@ -195,7 +195,7 @@ The `SessionManager` class (`src/llm/agents/session_manager.py`) is marked as de
 #### Bot Initialization (`src/bot/actions.py`)
 ```python
 # Initialize queue worker with LangChain
-from src.llm.agents.queue_worker import initialize_queue_worker
+from src.ai.agents.queue_worker import initialize_queue_worker
 queue_worker = initialize_queue_worker(use_langchain=True)
 await queue_worker.start()
 bot.queue_worker = queue_worker
@@ -254,7 +254,7 @@ except asyncio.TimeoutError:
     logger.error(f"Request timed out for user {request.user_id} after {timeout_seconds} seconds")
     if request.discord_channel:
         await request.discord_channel.send(
-            "ð **Request Timeout**: Your request took too long to process. "
+            "ï¿½ **Request Timeout**: Your request took too long to process. "
             "Please try again with a simpler question."
         )
     return False

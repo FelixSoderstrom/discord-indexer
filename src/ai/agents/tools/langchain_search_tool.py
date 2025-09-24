@@ -5,10 +5,10 @@ for seamless integration with LangChain agents.
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from langchain_core.tools import tool
 
-from src.llm.agents.tools.search_tool import create_search_tool
+from src.ai.agents.tools.search_tool import create_search_tool
 
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ def create_server_specific_search_tool(server_id: str):
         LangChain tool that can only search the specified server
     """
     @tool
-    def search_messages(query: str, limit: int = 5) -> str:
+    def search_messages(query: str) -> str:
         """Search Discord message history for relevant content.
         
         Use this tool when users ask about past conversations, specific topics,
@@ -37,7 +37,6 @@ def create_server_specific_search_tool(server_id: str):
         
         Args:
             query: Search query (e.g., "standup meeting", "project deadline", "John Doe messages", "what did sarah say about")
-            limit: Maximum number of results to return (default: 5, max: 10)
             
         Returns:
             Formatted string with search results including author display name, channel, timestamp, and content
@@ -46,8 +45,8 @@ def create_server_specific_search_tool(server_id: str):
             # Create search tool for the bound server
             search_tool = create_search_tool(server_id)
             
-            # Execute search
-            results = search_tool.search_messages(query, limit)
+            # Execute search with fixed limit
+            results = search_tool.search_messages(query, 15)
             
             # Format results
             formatted_results = search_tool.format_search_results(results)
@@ -67,7 +66,7 @@ def create_server_specific_search_tool(server_id: str):
 
 
 @tool
-def search_discord_messages(query: str, server_id: str, limit: int = 5) -> str:
+def search_discord_messages(query: str, server_id: str) -> str:
     """Search Discord message history for relevant content.
     
     Use this tool when users ask about past conversations, specific topics,
@@ -81,7 +80,6 @@ def search_discord_messages(query: str, server_id: str, limit: int = 5) -> str:
     Args:
         query: Search query (e.g., "standup meeting", "project deadline", "John Doe messages", "what did sarah say about")
         server_id: Discord server ID to search within (REQUIRED - no default)
-        limit: Maximum number of results to return (default: 5, max: 10)
         
     Returns:
         Formatted string with search results including author display name, channel, timestamp, and content
@@ -90,8 +88,8 @@ def search_discord_messages(query: str, server_id: str, limit: int = 5) -> str:
         # Create search tool for the server
         search_tool = create_search_tool(server_id)
         
-        # Execute search
-        results = search_tool.search_messages(query, limit)
+        # Execute search with fixed limit
+        results = search_tool.search_messages(query, 15)
         
         # Format results
         formatted_results = search_tool.format_search_results(results)
@@ -114,8 +112,8 @@ def get_search_tools(server_id: str) -> List:
         List of LangChain tools
     """
     # Create a partially applied version with server_id
-    def server_search_tool(query: str, limit: int = 5) -> str:
-        return search_discord_messages(query, server_id, limit)
+    def server_search_tool(query: str) -> str:
+        return search_discord_messages(query, server_id)
     
     # Update the tool's metadata
     server_search_tool.name = "search_discord_messages"
@@ -129,7 +127,6 @@ Use this when users ask about:
 
 Args:
     query (str): Search query describing what to find
-    limit (int): Number of results to return (default: 5, max: 10)
 
 Returns:
     str: Formatted search results with author, channel, and message content

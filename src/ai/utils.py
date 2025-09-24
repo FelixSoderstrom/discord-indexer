@@ -1,9 +1,12 @@
+import asyncio
 import ollama  # type: ignore[import-not-found]
 import logging
 import os
 import subprocess
 import re
 from typing import Dict, Any, Optional
+
+from src.config.settings import settings
 
 
 logger = logging.getLogger(__name__)
@@ -128,7 +131,9 @@ def get_model_max_context(model_name: str) -> int:
         result = subprocess.run(
             ['ollama', 'show', model_name], 
             capture_output=True, 
-            text=True, 
+            text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=30
         )
         
@@ -140,6 +145,11 @@ def get_model_max_context(model_name: str) -> int:
         
         # Parse context length from output
         # Looking for patterns like "context length    32768" or "context length: 32768"
+        if result.stdout is None:
+            logger.warning(f"No stdout from ollama show command for {model_name}")
+            _model_context_cache[model_name] = 2048
+            return 2048
+        
         context_match = re.search(r'context\s+length[:\s]+(\d+)', result.stdout, re.IGNORECASE)
         
         if context_match:
@@ -179,7 +189,9 @@ def is_model_loaded(model_name: str) -> bool:
         result = subprocess.run(
             ['ollama', 'ps'], 
             capture_output=True, 
-            text=True, 
+            text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=10
         )
         
@@ -221,3 +233,96 @@ def unload_model_from_memory(model_name: str) -> bool:
     except (ConnectionError, TimeoutError, OSError, ValueError, KeyError, RuntimeError) as e:
         logger.error(f"Error unloading model {model_name}: {e}")
         return False
+
+
+def generate_image_description_sync(image_data: bytes, prompt: str, model_name: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Generate image description using vision model.
+    
+    Args:
+        image_data: Raw image bytes
+        prompt: Text prompt for image description
+        model_name: Name of the vision model to use
+        
+    Returns:
+        Dictionary with description and metadata
+        
+    Raises:
+        ConnectionError, TimeoutError, OSError, ValueError, KeyError, RuntimeError:
+            If vision model processing fails
+    """
+    try:
+        import time
+        start_time = time.time()
+        
+        # Use environment vision model if none specified
+        if model_name is None:
+            model_name = settings.VISION_MODEL_NAME
+        
+        client = get_ollama_client()
+        
+        logger.debug(f"Generating image description using {model_name}")
+        
+        # Generate description using vision model
+        response = client.generate(
+            model=model_name,
+            prompt=prompt,
+            images=[image_data],
+            stream=False,
+            options={
+                "temperature": 0.1,  # Low temperature for consistent descriptions
+                "num_predict": 350   # Reduced token limit for structured format
+            }
+        )
+        
+        end_time = time.time()
+        response_time = end_time - start_time
+        
+        description = response.get('response', '').strip()
+        
+        if not description:
+            raise ValueError("Vision model returned empty description")
+        
+        result = {
+            'content': description,
+            'tokens_used': response.get('eval_count', 0),
+            'response_time': response_time,
+            'model_used': model_name,
+            'success': True,
+            'error': None
+        }
+        
+        logger.debug(f"Generated description in {response_time:.2f}s: {description[:100]}...")
+        return result
+        
+    except (ConnectionError, TimeoutError, OSError, ValueError, KeyError, RuntimeError) as e:
+        logger.error(f"Failed to generate image description: {e}")
+        return {
+            'content': '',
+            'tokens_used': 0,
+            'response_time': 0.0,
+            'model_used': model_name,
+            'success': False,
+            'error': str(e)
+        }
+
+
+async def generate_image_description_async(image_data: bytes, prompt: str, model_name: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Generate image description using vision model (async version).
+    
+    Args:
+        image_data: Raw image bytes
+        prompt: Text prompt for image description
+        model_name: Name of the vision model to use (uses settings.VISION_MODEL_NAME if None)
+        
+    Returns:
+        Dictionary with description and metadata
+        
+    Raises:
+        ConnectionError, TimeoutError, OSError, ValueError, KeyError, RuntimeError:
+            If vision model processing fails
+    """
+    return await asyncio.to_thread(
+        generate_image_description_sync, image_data, prompt, model_name
+    )

@@ -5,7 +5,7 @@ from typing import Dict, Any, List
 from dataclasses import dataclass
 from datetime import datetime
 
-from src.llm.utils import get_ollama_client, get_model_max_context
+from src.ai.utils import get_ollama_client, get_model_max_context
 
 try:
     from src.config.settings import settings
@@ -40,7 +40,7 @@ def generate_completion_sync(
     
     Args:
         prompt: Full conversation prompt (system + user messages formatted as string)
-        model_name: Ollama model name (defaults to env LLM_MODEL_NAME or llama3.2:3b-instruct)
+        model_name: Ollama model name (defaults to settings.TEXT_MODEL_NAME)
         temperature: Generation temperature (defaults to env LLM_TEMPERATURE or 0.7)
         max_tokens: Maximum tokens to generate (defaults to 500)
         
@@ -51,7 +51,7 @@ def generate_completion_sync(
     start_time = datetime.now()
     
     # Set defaults from environment
-    model_name = settings.LLM_MODEL_NAME
+    model_name = model_name or settings.TEXT_MODEL_NAME
     temperature = temperature if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.7"))
     max_tokens = max_tokens or 500
     
@@ -112,7 +112,7 @@ def generate_completion_with_messages_sync(
     
     Args:
         messages: List of message dicts with 'role' and 'content' keys
-        model_name: Ollama model name
+        model_name: Ollama model name (defaults to settings.TEXT_MODEL_NAME)
         temperature: Generation temperature
         max_tokens: Maximum tokens to generate
         
@@ -123,7 +123,7 @@ def generate_completion_with_messages_sync(
     start_time = datetime.now()
     
     # Set defaults from environment
-    model_name = model_name or os.getenv("LLM_MODEL_NAME", "llama3.1:8b")
+    model_name = model_name or settings.TEXT_MODEL_NAME
     temperature = temperature if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.7"))
     max_tokens = max_tokens or 500
     

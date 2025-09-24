@@ -10,7 +10,7 @@ from src.setup import is_server_configured
 
 if TYPE_CHECKING:
     from src.message_processing import MessagePipeline
-    from src.llm.agents.dm_assistant import DMAssistant
+    from src.ai.agents.dm_assistant import DMAssistant
 
 
 class DiscordBot(commands.Bot):

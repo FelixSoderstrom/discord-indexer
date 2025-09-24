@@ -5,8 +5,9 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 
-from src.llm.utils import ensure_model_available, health_check, get_ollama_client
-from src.llm.agents.tools.search_tool import create_search_tool
+from src.ai.utils import health_check, get_ollama_client
+from src.ai.model_manager import ModelManager
+from src.ai.agents.tools.search_tool import create_search_tool
 
 try:
     from src.config.settings import settings
@@ -37,7 +38,7 @@ class DMAssistant:
     
     def __init__(
         self,
-        model_name: str = None,
+        model_manager: ModelManager = None,
         temperature: float = None,
         max_response_length: int = None,
         max_context_messages: int = None
@@ -46,12 +47,14 @@ class DMAssistant:
         Initialize the DM Assistant
         
         Args:
-            model_name: Ollama model name
+            model_manager: ModelManager instance for handling text model
             temperature: Generation temperature
             max_response_length: Maximum response length for Discord
             max_context_messages: Maximum number of conversation messages to keep
         """
-        self.model_name = model_name or settings.LLM_MODEL_NAME
+        # Initialize or use provided ModelManager
+        self.model_manager = model_manager or ModelManager()
+        self.model_name = self.model_manager.get_text_model()
         self.temperature = (
             temperature 
             if temperature is not None 
@@ -72,9 +75,6 @@ class DMAssistant:
         
         # Load system prompt
         self.system_prompt = self._load_system_prompt()
-        
-        # Ensure model is available
-        ensure_model_available(self.model_name)
     
     def _load_system_prompt(self) -> str:
         """Load system prompt from text file"""

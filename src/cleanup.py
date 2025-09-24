@@ -16,7 +16,7 @@ from src.exceptions.message_processing import (
     LLMCleanupError,
     DatabaseCleanupError
 )
-from src.llm.utils import unload_model_from_memory, get_ollama_client
+from src.ai.utils import unload_model_from_memory, get_ollama_client
 from src.config.settings import settings
 
 if TYPE_CHECKING:

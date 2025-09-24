@@ -5,7 +5,7 @@ for context-aware responses and continuity across stateless interactions.
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from langchain_core.tools import tool
 
 from src.db.conversation_db import get_conversation_db
@@ -25,7 +25,7 @@ def create_conversation_search_tool(user_id: str, server_id: str):
         LangChain tool that can search this user's conversation history
     """
     @tool
-    def search_conversation_history(query_terms: str, limit: int = 10) -> str:
+    def search_conversation_history(query_terms: str) -> str:
         """Search the user's conversation history with the assistant.
         
         Use this tool to find relevant context from previous conversations
@@ -50,12 +50,12 @@ def create_conversation_search_tool(user_id: str, server_id: str):
             if not terms:
                 return "No search terms provided."
             
-            # Search conversation history
+            # Search conversation history with fixed limit
             results = conv_db.search_conversation_history(
                 user_id=user_id,
                 server_id=effective_server_id,
                 query_terms=terms,
-                limit=limit,
+                limit=15,
                 days_back=90  # Search last 90 days
             )
             
@@ -93,7 +93,7 @@ def create_conversation_search_tool(user_id: str, server_id: str):
 
 
 @tool
-def search_user_conversation_history(user_id: str, server_id: str, query_terms: str, limit: int = 10) -> str:
+def search_user_conversation_history(user_id: str, server_id: str, query_terms: str) -> str:
     """Search a user's conversation history with the assistant.
     
     Use this tool to find relevant context from previous conversations
@@ -117,12 +117,12 @@ def search_user_conversation_history(user_id: str, server_id: str, query_terms: 
         if not terms:
             return "No search terms provided."
         
-        # Search conversation history
+        # Search conversation history with fixed limit
         results = conv_db.search_conversation_history(
             user_id=user_id,
             server_id=server_id,
             query_terms=terms,
-            limit=limit,
+            limit=15,
             days_back=90  # Search last 90 days
         )
         

@@ -26,7 +26,7 @@ from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-from src.llm.agents.tools.langchain_search_tool import create_server_specific_search_tool
+from src.ai.agents.tools.langchain_search_tool import create_server_specific_search_tool
 
 try:
     from src.config.settings import settings
@@ -285,7 +285,7 @@ Use the search_messages tool when users ask about past conversations or events i
                 return True
             
             # Check if model is already loaded to set expectations
-            from src.llm.utils import is_model_loaded
+            from src.ai.utils import is_model_loaded
             model_already_loaded = await asyncio.get_running_loop().run_in_executor(
                 None, is_model_loaded, self.model_name
             )
@@ -330,7 +330,7 @@ Use the search_messages tool when users ask about past conversations or events i
         """
         try:
             # Use the existing Ollama client to do a lightweight server check
-            from src.llm.utils import get_ollama_client
+            from src.ai.utils import get_ollama_client
             
             loop = asyncio.get_running_loop()
             

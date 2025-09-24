@@ -14,9 +14,9 @@ except ImportError:
     # Fallback for testing without discord.py
     discord = None
 
-from src.llm.agents.conversation_queue import get_conversation_queue, ConversationRequest
-from src.llm.agents.dm_assistant import DMAssistant
-from src.llm.agents.langchain_dm_assistant import LangChainDMAssistant
+from src.ai.agents.conversation_queue import get_conversation_queue, ConversationRequest
+from src.ai.agents.dm_assistant import DMAssistant
+from src.ai.agents.langchain_dm_assistant import LangChainDMAssistant
 
 try:
     from src.config.settings import settings

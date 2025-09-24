@@ -10,12 +10,13 @@ from typing import List, Optional
 from datetime import datetime
 from dataclasses import dataclass
 from src.message_processing import MessagePipeline
+from src.message_processing.processor import process_message_async
 from src.setup import configure_all_servers, is_server_configured
-from src.llm.agents.langchain_dm_assistant import LangChainDMAssistant
-from src.llm.agents.queue_worker import initialize_queue_worker
+from src.ai.agents.langchain_dm_assistant import LangChainDMAssistant
+from src.ai.agents.queue_worker import initialize_queue_worker
 from src.db.setup_db import get_db
 from src.db.conversation_db import get_conversation_db
-from src.llm.agents.conversation_queue import get_conversation_queue
+from src.ai.agents.conversation_queue import get_conversation_queue
 
 
 @dataclass
@@ -167,7 +168,7 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
 
     Routes messages to appropriate handlers:
     - Commands (with ! prefix) → handled by commands extension automatically
-    - Server/guild messages → indexing pipeline
+    - Server/guild messages → async indexing pipeline
     - Non-command DM messages → helpful guidance (never indexed)
 
     Args:
@@ -210,16 +211,13 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
         # Command will be processed by bot.process_commands() after this handler
         return
 
-    # Check if pipeline is available for server messages
-    if not hasattr(bot, "message_pipeline") or not bot.message_pipeline:
-        logger.critical(
-            "❌ Message pipeline not available - application is fundamentally broken"
-        )
-        logger.critical(
-            "🛑 Shutting down application - cannot process messages without pipeline"
-        )
-        await bot.close()
-        sys.exit(1)
+    # Skip system messages
+    if message.type != discord.MessageType.default:
+        return
+        
+    # Skip empty messages (unless they have attachments)
+    if not message.content.strip() and not message.attachments:
+        return
 
     # Check if server is configured (should already be configured at startup)
     server_id = str(message.guild.id)
@@ -228,8 +226,24 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
         logger.warning(f"Skipping message indexing for unconfigured server {message.guild.name} ({server_id})")
         return
 
-    # Extract message data and wrap in list for unified pipeline interface
-    message_data = bot._extract_message_data(message)
+    # Convert Discord message to processing format
+    message_data = {
+        'id': message.id,
+        'content': message.content,
+        'author_id': message.author.id,
+        'author_name': message.author.display_name,
+        'channel_id': message.channel.id,
+        'guild_id': message.guild.id if message.guild else None,
+        'timestamp': message.created_at.isoformat(),
+        'attachments': [
+            {
+                'url': att.url,
+                'filename': att.filename,
+                'content_type': att.content_type
+            }
+            for att in message.attachments
+        ]
+    }
 
     content_preview = (
         message.content[:30] + "..." if len(message.content) > 30 else message.content
@@ -238,20 +252,15 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
         f"📨 Processing server message: #{message.channel.name} - {message.author.name}: {content_preview}"
     )
 
-    # Send single message as batch to pipeline (unified interface)
-    success = await bot.send_batch_to_pipeline([message_data])
-
-    if success:
-        logger.debug("✅ Message processed successfully through pipeline")
-    else:
-        logger.critical(
-            "❌ Failed to process message through pipeline - application is fundamentally broken"
-        )
-        logger.critical(
-            "🛑 Shutting down application - cannot continue without functional pipeline"
-        )
-        await bot.close()
-        sys.exit(1)
+    try:
+        # Use the NEW async processing pipeline
+        await process_message_async(message_data)
+        
+        logger.info(f"Successfully processed message from {message.author.display_name}")
+        
+    except Exception as e:
+        logger.error(f"Failed to process message {message.id}: {e}")
+        # Don't crash the bot on processing errors
 
 
 def setup_bot_actions(bot: "DiscordBot") -> None:
@@ -270,6 +279,21 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
     async def on_ready() -> None:
         """Event when bot connects to Discord."""
         await on_ready_handler(bot)
+
+    @bot.event
+    async def on_connect() -> None:
+        """Event when bot connects to Discord."""
+        logger.info("Discord bot connected successfully")
+
+    @bot.event
+    async def on_disconnect() -> None:
+        """Event when bot disconnects from Discord."""
+        logger.warning("Discord bot disconnected")
+
+    @bot.event
+    async def on_resumed() -> None:
+        """Event when bot session resumes."""
+        logger.info("Discord bot session resumed")
 
     @bot.event
     async def on_message(message: discord.Message) -> None:

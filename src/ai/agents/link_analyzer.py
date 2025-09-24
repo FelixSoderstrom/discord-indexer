@@ -2,8 +2,9 @@ import logging
 import os
 from typing import Dict, Optional
 
-from src.llm.chat_completion import generate_completion_with_messages_async, LLMResponse
-from src.llm.utils import ensure_model_available, health_check
+from src.ai.chat_completion import generate_completion_with_messages_async, LLMResponse
+from src.ai.model_manager import ModelManager
+from src.ai.utils import health_check
 from src.config.settings import settings
 from src.exceptions.message_processing import LLMProcessingError
 
@@ -15,17 +16,18 @@ class LinkAnalyzer:
     
     def __init__(
         self,
-        model_name: str = None,
+        model_manager: ModelManager = None,
         temperature: float = None
     ):
         """
         Initialize the Link Analyzer
         
         Args:
-            model_name: Ollama model name
+            model_manager: ModelManager instance for text model access
             temperature: Generation temperature
         """
-        self.model_name = model_name or settings.LLM_MODEL_NAME
+        self.model_manager = model_manager or ModelManager()
+        self.model_name = self.model_manager.get_text_model()
         self.temperature = (
             temperature 
             if temperature is not None 
@@ -36,9 +38,6 @@ class LinkAnalyzer:
         
         # Load system prompt
         self.system_prompt = self._load_system_prompt()
-        
-        # Ensure model is available
-        ensure_model_available(self.model_name)
     
     def _load_system_prompt(self) -> str:
         """Load system prompt from text file"""
@@ -79,12 +78,13 @@ class LinkAnalyzer:
                 {"role": "user", "content": f"Extract relevant content from this cleaned HTML:\n\n{cleaned_html}"}
             ]
             
-            # Generate response using chat completion API with token limit
+            # Generate response using chat completion API - llama3.2 handles context window natively
+            # Use hybrid approach: structured template + programmatic token limit
             llm_response = await generate_completion_with_messages_async(
                 messages=messages,
                 model_name=self.model_name,
                 temperature=self.temperature,
-                max_tokens=500  # Enforce 500 token limit in code
+                max_tokens=600  # Programmatic token limit as failsafe
             )
             
             if not llm_response.success:
@@ -118,6 +118,6 @@ class LinkAnalyzer:
         return {
             "model_name": self.model_name,
             "temperature": self.temperature,
-            "max_tokens": 500,
-            "agent_type": "link_analyzer"
+            "agent_type": "link_analyzer",
+            "context_handling": "llama3.2_sliding_window"
         }
