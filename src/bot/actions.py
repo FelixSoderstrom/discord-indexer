@@ -225,23 +225,41 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
         logger.warning(f"Skipping message indexing for unconfigured server {message.guild.name} ({server_id})")
         return
 
-    # Convert Discord message to processing format
+    # Convert Discord message to processing format (using nested structure to match historical processing)
     message_data = {
-        'id': message.id,
-        'content': message.content,
-        'author_id': message.author.id,
-        'author_name': message.author.display_name,
-        'channel_id': message.channel.id,
-        'guild_id': message.guild.id if message.guild else None,
-        'timestamp': message.created_at.isoformat(),
-        'attachments': [
-            {
-                'url': att.url,
-                'filename': att.filename,
-                'content_type': att.content_type
-            }
-            for att in message.attachments
-        ]
+        "id": message.id,
+        "content": message.content,
+        "author": {
+            "id": message.author.id,
+            "name": message.author.name,
+            "display_name": message.author.display_name,
+            "global_name": getattr(message.author, 'global_name', None),
+            "nick": getattr(message.author, 'nick', None),
+            "discriminator": getattr(message.author, 'discriminator', None),
+            "bot": message.author.bot,
+            "system": getattr(message.author, 'system', False)
+        },
+        "channel": {
+            "id": message.channel.id,
+            "name": message.channel.name,
+            "type": str(message.channel.type),
+            "category_id": getattr(message.channel, 'category_id', None),
+            "position": getattr(message.channel, 'position', None)
+        },
+        "guild": {
+            "id": message.guild.id,
+            "name": message.guild.name,
+            "icon": str(message.guild.icon) if message.guild.icon else None,
+            "member_count": getattr(message.guild, 'member_count', None),
+            "features": getattr(message.guild, 'features', [])
+        } if message.guild else {"id": None, "name": None},
+        "timestamp": message.created_at.isoformat(),
+        "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+        "pinned": message.pinned,
+        "reference": {"message_id": message.reference.message_id} if message.reference else None,
+        "attachments": [att.url for att in message.attachments],
+        "has_embeds": len(message.embeds) > 0,
+        "type": str(message.type),
     }
 
     content_preview = (
