@@ -252,14 +252,13 @@ async def on_message_handler(bot: "DiscordBot", message: discord.Message) -> Non
     )
 
     try:
-        # Use the proper MessagePipeline for processing
-        pipeline = MessagePipeline()
-        processed_data = pipeline.process_single_message(message_data)
+        # Use existing batch processing infrastructure with single-item batch
+        success = await bot.send_batch_to_pipeline([message_data])
         
-        if processed_data:
+        if success:
             logger.info(f"Successfully processed message from {message.author.display_name}")
         else:
-            logger.warning(f"Message processing returned no data for message {message.id}")
+            logger.warning(f"Message processing failed for message {message.id}")
         
     except Exception as e:
         logger.error(f"Failed to process message {message.id}: {e}")
