@@ -78,7 +78,7 @@
 - Test tool calling with both frameworks (native + LangChain)
 - Validate async operations and timeout handling
 
-## New Features & Components (Added Since Original Instructions)
+## New Features & Components
 
 ### ModelManager (src/ai/model_manager.py)
 - Centralized dual model lifecycle management
