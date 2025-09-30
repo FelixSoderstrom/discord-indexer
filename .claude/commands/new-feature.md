@@ -65,16 +65,16 @@ The success of this step is dependent on how well CLAUDE and USER are able to **
 ## 5. Implement changes
 
 When implementing the changes you **must** follow the plan you agreed upon.
-Straying from the plan must be done with caution and be justifiable with **good** cause for the betterment fo the application.
+Straying from the plan must be done with caution and be justifiable with **good** cause for the betterment of the application.
 Preferably you should **stop** when encountering a scenario where you want to stray from the agreed plan, provide a reason to why the deviation is acceptable and then await developer feedback on wether or not to do it.
-You are to implement these changes yourself andare **not** allowed to use subagents for this step.
+You implement these changes yourself and does **not** use subagents.
 
 
 ## 6. Iterate on fixes
 
 This step aims at removing bugs introduced and providing a final version of the feature.
 This step is only done when the developer are satisfied with the results.
-In some cases this step requires its own implementation plan - in which case it should follow the same rules stated above.
+In some cases this step requires it's own implementation plan - in which case it should follow the same rules stated above.
 
 
 ## 7. Create a new subagent
