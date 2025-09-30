@@ -3,6 +3,7 @@ name: llm-agent-manager
 description: Use proactively for all LLM operations, agent management, system prompt engineering, Ollama configuration, model optimization, RAG implementation, and local Mistral 7B integration tasks. Specialist for reviewing and modifying anything in src/llm/ directory.
 color: Orange
 tools: Read, Edit, Bash, Grep, Glob
+model: claude-sonnet-4-5-20250929
 ---
 
 # Purpose

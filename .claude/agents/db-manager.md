@@ -3,6 +3,7 @@ name: db-manager
 description: Specialist for database operations, ChromaDB and SQLite management, embedding generation, and vector storage optimization for Discord message indexing. Use proactively for database setup, vector operations, and storage management tasks.
 tools: Read, Edit, Bash, Grep
 color: Pink
+model: claude-sonnet-4-5-20250929
 ---
 
 # Purpose

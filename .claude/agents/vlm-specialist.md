@@ -3,6 +3,7 @@ name: vlm-specialist
 description: Use proactively for Vision Language Model operations including Minicpm-v lifecycle management, image processing pipelines, dual-model architecture management, Ollama vision integration, and VLM optimization on RTX 3090 hardware
 tools: Read, Write, Edit, MultiEdit, Bash, Grep, Glob
 color: Purple
+model: claude-sonnet-4-5-20250929
 ---
 
 # Purpose

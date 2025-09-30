@@ -3,6 +3,7 @@ name: websearcher
 description: Use proactively for comprehensive research on any technical topic, including API documentation, framework guides, implementation examples, and best practices from authoritative web sources. Use this agent when the user mentions "websearch X", "search the internet for X" or "google X".
 tools: WebSearch, WebFetch, Write
 color: Blue
+model: claude-sonnet-4-5-20250929
 ---
 
 # Purpose

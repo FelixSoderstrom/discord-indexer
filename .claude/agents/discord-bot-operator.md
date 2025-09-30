@@ -3,6 +3,7 @@ name: discord-bot-operator
 description: Use proactively for Discord bot operations, Discord.py client management, real-time message processing, rate limiting, command handling, and Discord API integrations. Specialist for coordinating with message processing pipeline and queue systems.
 color: Purple
 tools: Read, Edit, Bash, mcp__discord__send_message, mcp__discord__read_channel, mcp__discord__get_guild_info, mcp__discord__get_user_info
+model: claude-sonnet-4-5-20250929
 ---
 
 # Purpose

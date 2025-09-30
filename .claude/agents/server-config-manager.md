@@ -3,6 +3,7 @@ name: server-config-manager
 description: Use proactively for Discord bot server setup, configuration management, SQLite database operations, terminal UI interactions, and troubleshooting configuration-related issues
 tools: Read, Edit, MultiEdit, Write, Bash, Grep, Glob
 color: Blue
+model: claude-sonnet-4-5-20250929
 ---
 
 # Purpose

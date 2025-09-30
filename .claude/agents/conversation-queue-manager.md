@@ -3,6 +3,7 @@ name: conversation-queue-manager
 description: Use for managing the messaging queue system between USER and UIAssistant components. Specialist for queue operations, worker coordination, and conversation flow control.
 tools: Read, Edit, Bash, Grep
 color: Blue
+model: claude-sonnet-4-5-20250929
 ---
 
 # Purpose

@@ -3,6 +3,7 @@ name: bge-embedder-specialist
 description: Use proactively for BGE model lifecycle management, embedding generation workflows, GPU optimization, async preloading, thread-safe singleton patterns, and embedding performance issues. Specialist for BGE Text Embedder operations and optimization.
 tools: Read, Edit, MultiEdit, Bash, Grep, Glob
 color: Purple
+model: claude-sonnet-4-5-20250929
 ---
 
 # Purpose

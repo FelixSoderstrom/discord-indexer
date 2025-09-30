@@ -3,6 +3,7 @@ name: troubleshooter
 description: Diagnoses Discord-Indexer issues by analyzing logs, reading relevant code files, and following error traces to their source. Use this subagent when the user mentions "logfiles" or "logs" in a way thatsuggests they need to be read.
 tools: Read, Bash, Grep, Glob
 color: Red
+model: claude-sonnet-4-5-20250929
 ---
 
 # Purpose

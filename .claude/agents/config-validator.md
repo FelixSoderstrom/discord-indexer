@@ -3,6 +3,7 @@ name: config-validator
 description: Expert configuration management specialist. Use proactively for validating environment setup, checking dependencies, verifying hardware requirements, and managing Pydantic settings for Discord-Indexer.
 color: Yellow
 tools: Read, Edit, Bash, Glob
+model: claude-sonnet-4-5-20250929
 ---
 
 # Purpose

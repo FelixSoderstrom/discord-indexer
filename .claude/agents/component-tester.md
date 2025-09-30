@@ -3,6 +3,7 @@ name: component-tester
 description: Use proactively for testing individual components after new feature implementation. Specialist for writing modular test scripts, executing them, and providing detailed test reports without fixing failures.
 color: Red
 tools: Read, Write, Bash
+model: claude-sonnet-4-5-20250929
 ---
 
 # Purpose

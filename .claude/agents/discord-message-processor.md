@@ -3,6 +3,7 @@ name: discord-message-processor
 description: Use for managing Discord message processing pipeline operations, URL extraction, metadata processing, and state management. Specialist for Discord message history indexing workflows and bulk processing coordination.
 tools: Read, Edit, Bash, Grep, Glob
 color: Green
+model: claude-sonnet-4-5-20250929
 ---
 
 # Purpose
