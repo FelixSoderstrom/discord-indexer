@@ -1,5 +1,5 @@
 ---
-description: Implements new features and creates a subagents.
+description: Implements new features and creates a subagent.
 argument-hint: "The final result"
 ---
 
@@ -26,8 +26,13 @@ This section explains what the finished result looks like.
 
 ## 1. Research the codebase
 
-Subagents are available for each domain of this project - use them for research!
-
+- Think about what the user is describing, which subagent(s) this relates to and how you should structure the prompt for the subagent(s).
+- If insufficient context was given to conduct research you should stop and tell the user to be more descriptive.
+- Delegate the research to the subagent(s) and await response.
+Make sure to include any questions mentioned in **$ARGUMENTS** in your prompt.
+**IMPORTANT:** Prompt to subagents must explicitly state to not alter any code and only report back.
+- Respond to the user with a brief summary.
+Make sure to answer any questions that were defined in **$ARGUMENTS**
 
 ## 2. Ask for more context
 
