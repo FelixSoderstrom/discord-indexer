@@ -7,7 +7,7 @@ class BotSettings(BaseSettings):
 
     Manages environment-based configuration for Discord bot including
     token management, command prefix, debug settings, Discord intents,
-    and voice channel features.
+    voice channel features, and speech-to-text (STT) capabilities.
     """
 
     DISCORD_TOKEN: str
@@ -21,7 +21,15 @@ class BotSettings(BaseSettings):
     # Voice channel features
     ENABLE_VOICE_FEATURES: bool = False
     VOICE_TIMEOUT: int = 60
-    
+
+    # Speech-to-Text configuration
+    ENABLE_STT: bool = False
+    WHISPER_MODEL: str = "large-v3"
+    WHISPER_DEVICE: str = "cuda"
+    WHISPER_COMPUTE_TYPE: str = "int8"
+    STT_SILENCE_DURATION_MS: int = 500
+    STT_CACHE_DIR: str = "cache/transcriptions"
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
     
     @property

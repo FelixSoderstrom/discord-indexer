@@ -92,12 +92,14 @@ class VoiceChannelManager:
 
     async def join_channel(
         self,
-        channel: discord.VoiceChannel
+        channel: discord.VoiceChannel,
+        cls: type = None
     ) -> discord.VoiceClient:
         """Bot joins a voice channel.
 
         Args:
             channel: Voice channel to join
+            cls: Optional custom VoiceClient class (e.g., VoiceRecvClient for STT)
 
         Returns:
             Voice client connection
@@ -105,8 +107,12 @@ class VoiceChannelManager:
         Raises:
             discord.ClientException: If already connected to voice in this guild
         """
-        voice_client = await channel.connect()
-        logger.info(f"Bot joined voice channel '{channel.name}' (ID: {channel.id})")
+        if cls:
+            voice_client = await channel.connect(cls=cls)
+            logger.info(f"Bot joined voice channel '{channel.name}' (ID: {channel.id}) with custom client {cls.__name__}")
+        else:
+            voice_client = await channel.connect()
+            logger.info(f"Bot joined voice channel '{channel.name}' (ID: {channel.id})")
         return voice_client
 
     async def start_alone_timer(
@@ -264,6 +270,27 @@ class VoiceChannelManager:
 
             if voice_client and voice_client.is_connected():
                 try:
+                    # Stop STT listening if VoiceRecvClient is being used
+                    if hasattr(voice_client, 'stop_listening'):
+                        try:
+                            logger.debug(f"Stopping STT listening for channel {channel_id}")
+                            voice_client.stop_listening()
+                            logger.info(f"STT listening stopped for channel {channel_id}")
+
+                            # If audio sink exists, perform cleanup
+                            if hasattr(voice_client, '_stt_audio_sink'):
+                                audio_sink = voice_client._stt_audio_sink
+                                if audio_sink and hasattr(audio_sink, 'cleanup'):
+                                    logger.debug(f"Cleaning up audio sink for channel {channel_id}")
+                                    audio_sink.cleanup()
+                                    logger.info(f"Audio sink cleanup complete for channel {channel_id}")
+
+                            # Give a small delay for final transcription processing
+                            await asyncio.sleep(0.5)
+
+                        except Exception as stt_error:
+                            logger.error(f"Error stopping STT for channel {channel_id}: {stt_error}", exc_info=True)
+
                     # DEBUG: Log before disconnect
                     logger.debug(f"DEBUG: About to disconnect bot from channel {channel_id}")
                     await voice_client.disconnect(force=False)

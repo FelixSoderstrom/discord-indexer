@@ -1,15 +1,18 @@
-TODAYS DATE: 20 SEPTEMBER 2025
+TODAYS DATE: OCTOBER 1 2025
 
-# Discord-Indexer - Claude Code Configuration
+# Discord-Indexer
 
 ## Project Overview
-Discord bot that indexes server message history and provides intelligent search through DMs using local LLM processing. Built with Discord.py, ChromaDB, and Mistral 7B.
+Discord bot that indexes server message history and provides intelligent search through DMs using local LLM processing. Built with Discord.py, ChromaDB, and Llama 3.2.
 
 ## Core Technologies
 - **Primary Language**: Python 3.10.6
 - **Bot Framework**: Discord.py 2.6.0
 - **Database**: ChromaDB 1.0.20
-- **LLM**: Local Llama 8B via Ollama
+- **LLM**: Llama 3B via Ollama
+- **VLM**: MiniCPM-v
+- **Text embedding model**: BAAI/bge-large-en-v1.5
+- **Speech to text**: Whisper
 
 ## Universal Standards (ALL Agents)
 
@@ -24,8 +27,8 @@ Discord bot that indexes server message history and provides intelligent search 
 
 ### Documentation
 - Feature-level documentation is available in `documentation/[feature].md`
-- IMPORTANT: **ALWAYS** read relevant documentation for the task you are working on **before** implementing changes.
-- IMPORTANT: **ALWAYS** update relevant documentation after changes have been made to a feature.
+- Agent-specific instructions are available in `.claude/docs/agents/[agent-name]-instr.md`
+- IMPORTANT: **ALWAYS** update relevant documentation **and** instructions after changes have been made to a feature.
 
 ### Error Handling Guidelines
 - **NEVER catch broad exceptions** (`Exception as e` is prohibited)
@@ -33,7 +36,7 @@ Discord bot that indexes server message history and provides intelligent search 
 - **Always log errors** using the logger
 
 ### Security Considerations
-- Never log or expose Discord tokens
+- Never log or expose sensitive data
 - Secure handling of message data
 - Local-only LLM processing (no external API calls)
 

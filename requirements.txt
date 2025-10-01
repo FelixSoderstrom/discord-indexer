@@ -21,3 +21,12 @@ torchaudio
 Pillow>=10.0.0
 requests>=2.31.0
 aiohttp>=3.8.0
+
+# Audio Processing and STT
+faster-whisper>=1.0.0
+silero-vad>=0.5.0
+discord-ext-voice-recv>=0.3.0
+soundfile>=0.12.1
+pydub>=0.25.1
+ffmpeg-python>=0.2.0
+scipy>=1.10.0

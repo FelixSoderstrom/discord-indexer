@@ -7,6 +7,8 @@ from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from src.bot.rate_limiter import DiscordRateLimiter
 from src.message_processing.storage import get_server_indexing_status
 from src.setup import is_server_configured
+from src.ai.whisper_manager import preload_whisper_manager
+from src.exceptions.message_processing import LLMProcessingError
 
 if TYPE_CHECKING:
     from src.message_processing import MessagePipeline
@@ -80,6 +82,16 @@ class DiscordBot(commands.Bot):
     async def setup_hook(self) -> None:
         """Called when bot is starting up."""
         self.logger.info("Bot setup hook called - preparing to connect...")
+
+        # Preload Whisper model if STT is enabled
+        if settings.ENABLE_STT:
+            self.logger.info("Preloading Whisper model for speech-to-text...")
+            try:
+                await preload_whisper_manager()
+                self.logger.info("Whisper model preloaded successfully")
+            except (LLMProcessingError, RuntimeError, OSError, ValueError) as e:
+                self.logger.error(f"Failed to preload Whisper model: {e}")
+                self.logger.warning("Whisper model will be loaded on first use (may cause delays)")
 
     async def on_ready(self) -> None:
         """Event when bot connects to Discord."""

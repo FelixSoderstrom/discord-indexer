@@ -163,7 +163,50 @@ class ConversationQueueWorker:
 
             # Join channel (this may fail if PyNaCl is missing)
             try:
-                voice_client = await voice_manager.join_channel(channel)
+                # Check if STT is enabled to determine which voice client to use
+                if settings.ENABLE_STT:
+                    # Use VoiceRecvClient for STT support
+                    try:
+                        from discord.ext import voice_recv
+                        voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
+                        logger.info(f"Connected to voice channel {channel.id} with VoiceRecvClient for STT")
+                    except ImportError as import_error:
+                        logger.warning(f"discord-ext-voice-recv not available: {import_error}")
+                        logger.info("Falling back to standard voice client (STT disabled for this session)")
+                        voice_client = await voice_manager.join_channel(channel)
+                else:
+                    # Use standard voice client
+                    voice_client = await voice_manager.join_channel(channel)
+
+                # If STT is enabled and VoiceRecvClient is available, start listening
+                if settings.ENABLE_STT and hasattr(voice_client, 'listen'):
+                    try:
+                        from src.bot.audio_sink import STTAudioSink
+
+                        # Create audio sink with session_id and channel_id
+                        audio_sink = STTAudioSink(
+                            session_id=session_id,
+                            channel_id=channel.id
+                        )
+
+                        # Start listening to voice channel
+                        voice_client.listen(audio_sink)
+
+                        # Store audio_sink reference in voice_client for cleanup
+                        voice_client._stt_audio_sink = audio_sink
+
+                        # Start processing thread for the user
+                        # Note: Processing threads are created dynamically when users join
+                        # and start speaking (handled in AudioSink.write() method)
+
+                        logger.info(f"Started STT listening for session {session_id} in channel {channel.id}")
+
+                    except ImportError as import_error:
+                        logger.warning(f"STT audio sink not available: {import_error}")
+                    except Exception as stt_error:
+                        logger.error(f"Failed to start STT listening: {stt_error}", exc_info=True)
+                        # Continue without STT rather than failing completely
+
             except Exception as e:
                 logger.error(f"Failed to join voice channel: {e}")
                 # Cleanup: delete channel and end session

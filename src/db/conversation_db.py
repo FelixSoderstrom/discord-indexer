@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 
 class ConversationDatabase:
     """SQLite database manager for persistent conversation storage.
-    
+
     Provides thread-safe operations for storing and retrieving conversation
     history with server isolation. Each conversation is tracked by user_id
     and server_id to prevent cross-server data leakage.
-    
+
     Database Schema:
         conversations:
             - id: INTEGER PRIMARY KEY AUTOINCREMENT
@@ -33,6 +33,23 @@ class ConversationDatabase:
             - content: TEXT NOT NULL (Message content)
             - timestamp: DATETIME DEFAULT CURRENT_TIMESTAMP
             - session_id: TEXT (Optional session grouping)
+
+        voice_sessions:
+            - id: INTEGER PRIMARY KEY AUTOINCREMENT
+            - user_id: TEXT NOT NULL (Discord user ID)
+            - guild_id: TEXT NOT NULL (Discord server/guild ID)
+            - channel_id: TEXT NOT NULL (Voice channel ID)
+            - created_at: DATETIME DEFAULT CURRENT_TIMESTAMP
+            - ended_at: DATETIME DEFAULT NULL
+
+        voice_transcriptions:
+            - id: INTEGER PRIMARY KEY AUTOINCREMENT
+            - session_id: INTEGER NOT NULL (FK to voice_sessions.id)
+            - chunk_index: INTEGER NOT NULL (Order of audio chunk)
+            - transcript_text: TEXT NOT NULL (Transcribed text)
+            - confidence_score: REAL (Transcription confidence 0-1)
+            - created_at: DATETIME DEFAULT CURRENT_TIMESTAMP
+            - audio_duration_seconds: REAL (Duration of audio chunk)
     """
     
     def __init__(self, db_path: Optional[Path] = None):
@@ -115,6 +132,36 @@ class ConversationDatabase:
                 ON voice_sessions(channel_id)
             ''')
 
+            # Create voice_transcriptions table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS voice_transcriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    chunk_index INTEGER NOT NULL,
+                    transcript_text TEXT NOT NULL,
+                    confidence_score REAL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    audio_duration_seconds REAL,
+                    FOREIGN KEY (session_id) REFERENCES voice_sessions(id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Create indexes for voice_transcriptions
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_transcription_session
+                ON voice_transcriptions(session_id)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_transcription_created
+                ON voice_transcriptions(created_at)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_transcription_session_chunk
+                ON voice_transcriptions(session_id, chunk_index)
+            ''')
+
             conn.commit()
             logger.debug("Database schema initialized successfully")
     
@@ -128,6 +175,8 @@ class ConversationDatabase:
                 check_same_thread=False
             )
             conn.row_factory = sqlite3.Row
+            # Enable foreign key constraints
+            conn.execute("PRAGMA foreign_keys = ON")
             try:
                 yield conn
             finally:
@@ -655,6 +704,243 @@ class ConversationDatabase:
         except sqlite3.Error as e:
             logger.error(f"Database error retrieving all active sessions: {e}")
             return []
+
+    def add_transcription(
+        self,
+        session_id: int,
+        chunk_index: int,
+        transcript_text: str,
+        confidence_score: Optional[float] = None,
+        audio_duration_seconds: Optional[float] = None
+    ) -> bool:
+        """Add a transcription chunk for a voice session.
+
+        Args:
+            session_id: Voice session ID
+            chunk_index: Order/index of this audio chunk
+            transcript_text: Transcribed text content
+            confidence_score: Optional confidence score (0-1)
+            audio_duration_seconds: Optional duration of audio chunk
+
+        Returns:
+            True if transcription added successfully, False otherwise
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO voice_transcriptions
+                    (session_id, chunk_index, transcript_text, confidence_score, audio_duration_seconds)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (session_id, chunk_index, transcript_text, confidence_score, audio_duration_seconds))
+
+                conn.commit()
+
+                logger.debug(
+                    f"Added transcription chunk {chunk_index} for session {session_id}"
+                )
+                return True
+
+        except sqlite3.IntegrityError as e:
+            logger.warning(f"Foreign key constraint failed for transcription: {e}")
+            return False
+        except sqlite3.Error as e:
+            logger.error(f"Database error adding transcription: {e}")
+            return False
+
+    def get_session_transcriptions(
+        self,
+        session_id: int,
+        limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Get transcription chunks for a voice session.
+
+        Args:
+            session_id: Voice session ID
+            limit: Optional maximum number of chunks to return
+
+        Returns:
+            List of transcription dictionaries in chronological order
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                if limit:
+                    cursor.execute('''
+                        SELECT id, session_id, chunk_index, transcript_text,
+                               confidence_score, created_at, audio_duration_seconds
+                        FROM voice_transcriptions
+                        WHERE session_id = ?
+                        ORDER BY chunk_index ASC
+                        LIMIT ?
+                    ''', (session_id, limit))
+                else:
+                    cursor.execute('''
+                        SELECT id, session_id, chunk_index, transcript_text,
+                               confidence_score, created_at, audio_duration_seconds
+                        FROM voice_transcriptions
+                        WHERE session_id = ?
+                        ORDER BY chunk_index ASC
+                    ''', (session_id,))
+
+                rows = cursor.fetchall()
+
+                transcriptions = []
+                for row in rows:
+                    transcriptions.append({
+                        'id': row['id'],
+                        'session_id': row['session_id'],
+                        'chunk_index': row['chunk_index'],
+                        'transcript_text': row['transcript_text'],
+                        'confidence_score': row['confidence_score'],
+                        'created_at': row['created_at'],
+                        'audio_duration_seconds': row['audio_duration_seconds']
+                    })
+
+                logger.debug(
+                    f"Retrieved {len(transcriptions)} transcription chunks "
+                    f"for session {session_id}"
+                )
+                return transcriptions
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error retrieving transcriptions: {e}")
+            return []
+
+    def get_full_transcript(self, session_id: int) -> str:
+        """Get the complete transcript for a voice session.
+
+        Joins all transcription chunks in order to create a full transcript.
+
+        Args:
+            session_id: Voice session ID
+
+        Returns:
+            Complete transcript text with chunks joined by space
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT transcript_text
+                    FROM voice_transcriptions
+                    WHERE session_id = ?
+                    ORDER BY chunk_index ASC
+                ''', (session_id,))
+
+                rows = cursor.fetchall()
+
+                if not rows:
+                    logger.debug(f"No transcriptions found for session {session_id}")
+                    return ""
+
+                full_transcript = " ".join(row['transcript_text'] for row in rows)
+
+                logger.debug(
+                    f"Compiled full transcript for session {session_id} "
+                    f"({len(rows)} chunks, {len(full_transcript)} chars)"
+                )
+                return full_transcript
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error getting full transcript: {e}")
+            return ""
+
+    def clear_session_transcriptions(self, session_id: int) -> bool:
+        """Clear all transcriptions for a voice session.
+
+        Args:
+            session_id: Voice session ID
+
+        Returns:
+            True if cleared successfully, False otherwise
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM voice_transcriptions
+                    WHERE session_id = ?
+                ''', (session_id,))
+
+                deleted_count = cursor.rowcount
+                conn.commit()
+
+                logger.info(
+                    f"Cleared {deleted_count} transcriptions for session {session_id}"
+                )
+                return True
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error clearing transcriptions: {e}")
+            return False
+
+    def get_transcription_stats(self, session_id: int) -> Dict[str, Any]:
+        """Get statistics for a voice session's transcriptions.
+
+        Args:
+            session_id: Voice session ID
+
+        Returns:
+            Dictionary with transcription statistics
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Count chunks
+                cursor.execute('''
+                    SELECT COUNT(*) as chunk_count
+                    FROM voice_transcriptions
+                    WHERE session_id = ?
+                ''', (session_id,))
+                chunk_count = cursor.fetchone()['chunk_count']
+
+                # Get total duration and average confidence
+                cursor.execute('''
+                    SELECT
+                        SUM(audio_duration_seconds) as total_duration,
+                        AVG(confidence_score) as avg_confidence,
+                        MIN(confidence_score) as min_confidence,
+                        MAX(confidence_score) as max_confidence
+                    FROM voice_transcriptions
+                    WHERE session_id = ?
+                ''', (session_id,))
+                row = cursor.fetchone()
+
+                # Get total character count
+                cursor.execute('''
+                    SELECT SUM(LENGTH(transcript_text)) as total_chars
+                    FROM voice_transcriptions
+                    WHERE session_id = ?
+                ''', (session_id,))
+                total_chars = cursor.fetchone()['total_chars'] or 0
+
+                stats = {
+                    'session_id': session_id,
+                    'chunk_count': chunk_count,
+                    'total_duration_seconds': row['total_duration'] or 0.0,
+                    'total_characters': total_chars,
+                    'avg_confidence_score': row['avg_confidence'],
+                    'min_confidence_score': row['min_confidence'],
+                    'max_confidence_score': row['max_confidence']
+                }
+
+                logger.debug(f"Retrieved transcription stats for session {session_id}")
+                return stats
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error getting transcription stats: {e}")
+            return {
+                'session_id': session_id,
+                'chunk_count': 0,
+                'total_duration_seconds': 0.0,
+                'total_characters': 0,
+                'avg_confidence_score': None,
+                'min_confidence_score': None,
+                'max_confidence_score': None
+            }
 
 
 # Global conversation database instance
