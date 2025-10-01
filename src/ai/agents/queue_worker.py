@@ -17,6 +17,8 @@ except ImportError:
 from src.ai.agents.conversation_queue import get_conversation_queue, ConversationRequest
 from src.ai.agents.dm_assistant import DMAssistant
 from src.ai.agents.langchain_dm_assistant import LangChainDMAssistant
+from src.bot.voice_handler import get_voice_manager
+from src.db.conversation_db import get_conversation_db
 
 try:
     from src.config.settings import settings
@@ -33,22 +35,24 @@ logger = logging.getLogger(__name__)
 class ConversationQueueWorker:
     """Worker that processes conversation requests from the queue."""
     
-    def __init__(self, dm_assistant=None, use_langchain: bool = True):
+    def __init__(self, dm_assistant=None, use_langchain: bool = True, bot=None):
         """Initialize queue worker.
-        
+
         Args:
             dm_assistant: DMAssistant instance to use for processing (legacy)
             use_langchain: Whether to use LangChain agent (default: True)
+            bot: Discord bot instance (optional, required for voice features)
         """
         self.use_langchain = use_langchain
-        
+        self.bot = bot  # Store bot reference for voice channel operations
+
         if use_langchain:
             self.dm_assistant = LangChainDMAssistant()
             logger.info("ConversationQueueWorker initialized with LangChain agent")
         else:
             self.dm_assistant = dm_assistant or DMAssistant()
             logger.info("ConversationQueueWorker initialized with legacy DMAssistant")
-        
+
         self.queue = get_conversation_queue()
         self.running = False
         self._worker_task: Optional[asyncio.Task] = None
@@ -95,7 +99,118 @@ class ConversationQueueWorker:
             logger.info("DMAssistant reference cleared from queue worker")
         
         logger.info("Queue worker stopped completely")
-    
+
+    async def _process_voice_request(self, request: ConversationRequest) -> bool:
+        """Process a voice channel request.
+
+        Args:
+            request: Voice request to process
+
+        Returns:
+            True if processed successfully, False otherwise
+        """
+        try:
+            # Check if bot reference is available
+            if not self.bot:
+                logger.error("Bot reference not available for voice request")
+                if request.discord_channel:
+                    await request.discord_channel.send(
+                        "Voice features are not properly configured."
+                    )
+                return False
+
+            voice_manager = get_voice_manager(self.bot)
+            db = get_conversation_db()
+
+            # Get the guild from the request
+            user_id_int = int(request.user_id)
+            guild_id_int = int(request.server_id)
+            guild = self.bot.get_guild(guild_id_int)
+
+            if not guild:
+                logger.error(f"Guild {request.server_id} not found")
+                if request.discord_channel:
+                    await request.discord_channel.send(
+                        "Selected server not found. Please try again."
+                    )
+                return False
+
+            user = guild.get_member(user_id_int)
+            if not user:
+                logger.error(
+                    f"User {request.user_id} not found in guild {guild.id}"
+                )
+                if request.discord_channel:
+                    await request.discord_channel.send(
+                        "You are not a member of the selected server."
+                    )
+                return False
+
+            # Create private voice channel
+            channel = await voice_manager.create_private_channel(guild, user)
+
+            # Store session in database BEFORE joining (so cleanup can find it)
+            session_id = db.create_voice_session(
+                user_id=request.user_id,
+                guild_id=str(guild.id),
+                channel_id=str(channel.id)
+            )
+
+            if not session_id:
+                logger.error("Failed to create voice session in database")
+                await channel.delete(reason="Database error")
+                return False
+
+            # Join channel (this may fail if PyNaCl is missing)
+            try:
+                voice_client = await voice_manager.join_channel(channel)
+            except Exception as e:
+                logger.error(f"Failed to join voice channel: {e}")
+                # Cleanup: delete channel and end session
+                await channel.delete(reason="Failed to join voice channel")
+                db.end_voice_session(session_id)
+                if request.discord_channel:
+                    await request.discord_channel.send(
+                        f"Failed to join voice channel: {e}\n"
+                        "PyNaCl library may be missing. Ask admin to run: pip install PyNaCl"
+                    )
+                return False
+
+            # Start alone timer
+            await voice_manager.start_alone_timer(
+                channel_id=channel.id,
+                user_id=request.user_id,
+                session_id=session_id
+            )
+
+            # Send success message
+            if request.discord_channel:
+                await request.discord_channel.send(
+                    f"Voice channel created: {channel.mention}\n"
+                    f"Join within {settings.VOICE_TIMEOUT} seconds."
+                )
+
+            logger.info(
+                f"Voice session created for user {request.user_id} "
+                f"in guild {guild.name} (session_id: {session_id})"
+            )
+            return True
+
+        except discord.HTTPException as e:
+            logger.error(f"Discord error processing voice request: {e}")
+            if request.discord_channel:
+                await request.discord_channel.send(
+                    f"Failed to create voice channel: {e}"
+                )
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error processing voice request: {e}")
+            if request.discord_channel:
+                await request.discord_channel.send(
+                    "An error occurred while creating the voice channel."
+                )
+            return False
+
     async def _log_conversation_message(
         self, 
         user_id: str, 
@@ -183,10 +298,15 @@ class ConversationQueueWorker:
             
             # Add timeout handling
             timeout_seconds = 60  # 1 minute timeout
-            
+
+            # Route based on request type
+            if request.request_type == "voice":
+                logger.info(f"Processing voice request from user {request.user_id}")
+                return await self._process_voice_request(request)
+
             # Process as stateless chat completion - no conversation history
             logger.info(f"Processing stateless request from user {request.user_id}")
-            
+
             # Log user message to database before processing
             await self._log_conversation_message(
                 user_id=request.user_id,
@@ -314,20 +434,21 @@ def get_queue_worker() -> Optional[ConversationQueueWorker]:
     return _queue_worker
 
 
-def initialize_queue_worker(dm_assistant=None, use_langchain: bool = True) -> ConversationQueueWorker:
+def initialize_queue_worker(dm_assistant=None, use_langchain: bool = True, bot=None) -> ConversationQueueWorker:
     """Initialize the global queue worker.
-    
+
     Args:
         dm_assistant: DMAssistant instance to use (legacy, optional)
         use_langchain: Whether to use LangChain agent (default: True)
-        
+        bot: Discord bot instance (optional, required for voice features)
+
     Returns:
         ConversationQueueWorker instance
     """
     global _queue_worker
-    
+
     if _queue_worker is None:
-        _queue_worker = ConversationQueueWorker(dm_assistant, use_langchain)
+        _queue_worker = ConversationQueueWorker(dm_assistant, use_langchain, bot)
         logger.info(f"Queue worker initialized with {'LangChain' if use_langchain else 'legacy'} agent")
-    
+
     return _queue_worker

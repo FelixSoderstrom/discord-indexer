@@ -4,11 +4,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class BotSettings(BaseSettings):
     """Discord bot configuration settings.
-    
+
     Manages environment-based configuration for Discord bot including
-    token management, command prefix, debug settings, and Discord intents.
+    token management, command prefix, debug settings, Discord intents,
+    and voice channel features.
     """
-    
+
     DISCORD_TOKEN: str
     COMMAND_PREFIX: str = "!"
     DEBUG: bool = False
@@ -16,6 +17,10 @@ class BotSettings(BaseSettings):
     VISION_MODEL_NAME: str
     LANGCHAIN_VERBOSE: bool = False
     EMBEDDING_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"
+
+    # Voice channel features
+    ENABLE_VOICE_FEATURES: bool = False
+    VOICE_TIMEOUT: int = 60
     
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
     
@@ -31,16 +36,21 @@ class BotSettings(BaseSettings):
     @property
     def get_intents(self) -> discord.Intents:
         """Configure Discord intents for message reading and server access.
-        
+
         Returns:
             Discord.Intents object configured for message content, guild access,
-            message events, and member information.
+            message events, member information, and optionally voice states.
         """
         intents = discord.Intents.default()
         intents.message_content = True    # For reading message content
-        intents.guilds = True             # For server information  
+        intents.guilds = True             # For server information
         intents.guild_messages = True     # For message events
         intents.members = True            # For member information
+
+        # Enable voice state tracking if voice features are enabled
+        if self.ENABLE_VOICE_FEATURES:
+            intents.voice_states = True   # For voice channel events
+
         return intents
 
 

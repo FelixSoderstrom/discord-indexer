@@ -38,7 +38,7 @@ class RequestStatus(Enum):
 @dataclass
 class ConversationRequest:
     """A conversation request in the queue."""
-    
+
     user_id: str
     server_id: str
     message: str
@@ -47,6 +47,7 @@ class ConversationRequest:
     discord_channel: Optional[object] = None  # Discord channel for message updates
     status: RequestStatus = RequestStatus.QUEUED
     status_message_id: Optional[int] = None  # ID of status message to edit
+    request_type: str = "ask"  # "ask" or "voice"
 
 
 class ConversationQueue:
@@ -78,16 +79,17 @@ class ConversationQueue:
         """Check if user already has a request queued or processing."""
         return user_id in self._active_requests
     
-    async def add_request(self, user_id: str, server_id: str, message: str, discord_message_id: Optional[int] = None, discord_channel=None) -> bool:
+    async def add_request(self, user_id: str, server_id: str, message: str, discord_message_id: Optional[int] = None, discord_channel=None, request_type: str = "ask") -> bool:
         """Add a conversation request to the queue.
-        
+
         Args:
             user_id: Discord user ID
             server_id: Discord server ID
             message: User's message content
             discord_message_id: Optional Discord message ID for status updates
             discord_channel: Optional Discord channel for status updates
-            
+            request_type: Type of request ("ask" or "voice")
+
         Returns:
             True if request added successfully, False if rejected
         """
@@ -108,7 +110,8 @@ class ConversationQueue:
             message=message,
             timestamp=datetime.now(),
             discord_message_id=discord_message_id,
-            discord_channel=discord_channel
+            discord_channel=discord_channel,
+            request_type=request_type
         )
         
         try:

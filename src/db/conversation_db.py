@@ -83,10 +83,38 @@ class ConversationDatabase:
             ''')
             
             cursor.execute('''
-                CREATE INDEX IF NOT EXISTS idx_session 
+                CREATE INDEX IF NOT EXISTS idx_session
                 ON conversations(session_id)
             ''')
-            
+
+            # Create voice_sessions table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS voice_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    guild_id TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    ended_at DATETIME DEFAULT NULL
+                )
+            ''')
+
+            # Create indexes for voice_sessions
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_voice_user_guild
+                ON voice_sessions(user_id, guild_id)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_voice_created
+                ON voice_sessions(created_at)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_voice_channel
+                ON voice_sessions(channel_id)
+            ''')
+
             conn.commit()
             logger.debug("Database schema initialized successfully")
     
@@ -447,6 +475,186 @@ class ConversationDatabase:
         except sqlite3.Error as e:
             logger.error(f"Database error getting stats: {e}")
             return {}
+
+    def create_voice_session(
+        self,
+        user_id: str,
+        guild_id: str,
+        channel_id: str
+    ) -> Optional[int]:
+        """Start tracking a new voice session.
+
+        Args:
+            user_id: Discord user ID
+            guild_id: Discord server/guild ID
+            channel_id: Voice channel ID
+
+        Returns:
+            Session ID if created successfully, None otherwise
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO voice_sessions
+                    (user_id, guild_id, channel_id)
+                    VALUES (?, ?, ?)
+                ''', (user_id, guild_id, channel_id))
+
+                session_id = cursor.lastrowid
+                conn.commit()
+
+                logger.debug(
+                    f"Started voice session {session_id} for user {user_id} "
+                    f"in guild {guild_id}, channel {channel_id}"
+                )
+                return session_id
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error adding voice session: {e}")
+            return None
+
+    def end_voice_session(self, session_id: int) -> bool:
+        """End a voice session.
+
+        Args:
+            session_id: Voice session ID to end
+
+        Returns:
+            True if ended successfully, False otherwise
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute('''
+                    UPDATE voice_sessions
+                    SET ended_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''', (session_id,))
+
+                conn.commit()
+
+                logger.debug(f"Ended voice session {session_id}")
+                return True
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error ending voice session: {e}")
+            return False
+
+    def get_active_session_by_user(
+        self,
+        user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get user's active voice session.
+
+        Args:
+            user_id: Discord user ID
+
+        Returns:
+            Session dictionary if active session exists, None otherwise
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, user_id, guild_id, channel_id, created_at
+                    FROM voice_sessions
+                    WHERE user_id = ? AND ended_at IS NULL
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ''', (user_id,))
+
+                row = cursor.fetchone()
+
+                if row:
+                    return {
+                        'id': row['id'],
+                        'user_id': row['user_id'],
+                        'guild_id': row['guild_id'],
+                        'channel_id': row['channel_id'],
+                        'created_at': row['created_at']
+                    }
+
+                return None
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error retrieving active session: {e}")
+            return None
+
+    def get_active_session_by_channel(
+        self,
+        channel_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get active voice session by channel ID.
+
+        Args:
+            channel_id: Voice channel ID
+
+        Returns:
+            Session dictionary if active session exists, None otherwise
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, user_id, guild_id, channel_id, created_at
+                    FROM voice_sessions
+                    WHERE channel_id = ? AND ended_at IS NULL
+                    LIMIT 1
+                ''', (channel_id,))
+
+                row = cursor.fetchone()
+
+                if row:
+                    return {
+                        'id': row['id'],
+                        'user_id': row['user_id'],
+                        'guild_id': row['guild_id'],
+                        'channel_id': row['channel_id'],
+                        'created_at': row['created_at']
+                    }
+
+                return None
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error retrieving session by channel: {e}")
+            return None
+
+    def get_all_active_sessions(self) -> List[Dict[str, Any]]:
+        """Get all active voice sessions.
+
+        Returns:
+            List of active session dictionaries
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, user_id, guild_id, channel_id, created_at
+                    FROM voice_sessions
+                    WHERE ended_at IS NULL
+                    ORDER BY created_at DESC
+                ''')
+
+                rows = cursor.fetchall()
+
+                sessions = []
+                for row in rows:
+                    sessions.append({
+                        'id': row['id'],
+                        'user_id': row['user_id'],
+                        'guild_id': row['guild_id'],
+                        'channel_id': row['channel_id'],
+                        'created_at': row['created_at']
+                    })
+
+                logger.debug(f"Retrieved {len(sessions)} active voice sessions")
+                return sessions
+
+        except sqlite3.Error as e:
+            logger.error(f"Database error retrieving all active sessions: {e}")
+            return []
 
 
 # Global conversation database instance

@@ -16,6 +16,8 @@ from src.ai.agents.queue_worker import initialize_queue_worker
 from src.db.setup_db import get_db
 from src.db.conversation_db import get_conversation_db
 from src.ai.agents.conversation_queue import get_conversation_queue
+from src.bot.voice_handler import get_voice_manager
+from src.config.settings import settings
 
 
 @dataclass
@@ -102,7 +104,7 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
         # Initialize queue worker with LangChain
         logger.info("⚡ Starting LangChain conversation queue worker...")
 
-        queue_worker = initialize_queue_worker(use_langchain=True)
+        queue_worker = initialize_queue_worker(use_langchain=True, bot=bot)
         await queue_worker.start()
         bot.queue_worker = queue_worker  # Store reference for cleanup
         logger.info("✅ LangChain queue worker started successfully")
@@ -321,6 +323,53 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         await on_message_handler(bot, message)
         # Process commands after handling the message
         await bot.process_commands(message)
+
+    @bot.event
+    async def on_voice_state_update(
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState
+    ) -> None:
+        """Event when member's voice state changes."""
+        # Only process if voice features are enabled
+        if not settings.ENABLE_VOICE_FEATURES:
+            return
+
+        voice_manager = get_voice_manager(bot)
+        db = get_conversation_db()
+
+        # Check if either channel is a managed voice session
+        channels_to_check = []
+        if before.channel:
+            channels_to_check.append((before.channel, "leave"))
+        if after.channel:
+            channels_to_check.append((after.channel, "join"))
+
+        for channel, action in channels_to_check:
+            session = db.get_active_session_by_channel(str(channel.id))
+
+            if not session:
+                continue  # Not a managed session
+
+            user_id = session['user_id']
+            session_id = session['id']
+
+            # User joins their waiting channel
+            if action == "join" and str(member.id) == user_id:
+                logger.info(
+                    f"User {member.id} joined their voice channel {channel.id}"
+                )
+                # Cancel alone timer
+                voice_manager.cancel_timer(channel.id)
+
+            # User leaves their channel
+            elif action == "leave" and str(member.id) == user_id:
+                logger.info(
+                    f"User {member.id} left their voice channel {channel.id}, "
+                    "triggering cleanup"
+                )
+                # Immediate cleanup
+                await voice_manager.cleanup_channel(channel.id, session_id)
 
     # ===== HELPER FUNCTIONS =====
 
@@ -698,6 +747,114 @@ def setup_bot_actions(bot: "DiscordBot") -> None:
         embed.set_footer(text="Developed for intelligent Discord data analysis")
 
         await ctx.send(embed=embed)
+
+    @bot.command(name="voice")
+    async def voice_command(ctx: commands.Context, *, server_selection: str = None) -> None:
+        """Create a private voice channel for interaction with the bot."""
+        # Check if voice features are enabled
+        if not settings.ENABLE_VOICE_FEATURES:
+            await ctx.send(
+                "Voice features are currently disabled on this bot."
+            )
+            return
+
+        # Only work in DMs
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send(
+                "The `!voice` command only works in direct messages."
+            )
+            return
+
+        user_id = str(ctx.author.id)
+        queue = get_conversation_queue()
+
+        # Check if user already in queue
+        if queue.is_user_queued(user_id):
+            position = queue.get_queue_position(user_id)
+            await ctx.send(
+                f"You already have a request in the queue (position {position})."
+            )
+            return
+
+        # Get mutual guilds
+        voice_manager = get_voice_manager(bot)
+        mutual_guilds = voice_manager.get_mutual_guilds(ctx.author.id)
+
+        if not mutual_guilds:
+            await ctx.send(
+                "No shared servers found. Make sure you're in at least one server with the bot."
+            )
+            return
+
+        # If server specified, find and use it
+        selected_guild = None
+        if server_selection:
+            # Try to find by number first
+            try:
+                guild_num = int(server_selection)
+                if 1 <= guild_num <= len(mutual_guilds):
+                    selected_guild = mutual_guilds[guild_num - 1]
+            except ValueError:
+                # Try to find by name
+                for guild in mutual_guilds:
+                    if guild.name.lower() == server_selection.lower():
+                        selected_guild = guild
+                        break
+
+            if not selected_guild:
+                await ctx.send(
+                    f"Invalid server selection: '{server_selection}'. "
+                    f"Use `!voice` without arguments to see available servers."
+                )
+                return
+
+        # If only one server or server specified, go directly to queue
+        if len(mutual_guilds) == 1 or selected_guild:
+            guild = selected_guild or mutual_guilds[0]
+
+            # Add to queue with request_type="voice"
+            success = await queue.add_request(
+                user_id=user_id,
+                server_id=str(guild.id),
+                message="",  # No message needed for voice requests
+                discord_message_id=ctx.message.id,
+                discord_channel=ctx.channel,
+                request_type="voice"
+            )
+
+            if success:
+                position = queue.get_queue_position(user_id)
+                if position == 1:
+                    status_msg = await ctx.send(
+                        f"Queued: Creating voice channel in **{guild.name}** - processing soon..."
+                    )
+                else:
+                    status_msg = await ctx.send(
+                        f"Queued: Position {position} in queue - will create voice channel in **{guild.name}**"
+                    )
+
+                # Store status message ID for updates
+                if user_id in queue._active_requests:
+                    queue._active_requests[user_id].status_message_id = status_msg.id
+            else:
+                await ctx.send(
+                    "Queue is full. Please try again later."
+                )
+            return
+
+        # Multiple servers - send selection message with instructions
+        selection_text = "**Server Selection**: Which server should I create a voice channel in?\n\n"
+
+        for i, guild in enumerate(mutual_guilds, 1):
+            selection_text += f"**{i}. {guild.name}**\n"
+
+        selection_text += (
+            "\n**How to select**:\n"
+            f"• By number: `!voice {1}` (for first server)\n"
+            f"• By name: `!voice {mutual_guilds[0].name}`"
+        )
+
+        await ctx.send(selection_text)
 
     # ===== COMMAND ERROR HANDLING =====
     @bot.event

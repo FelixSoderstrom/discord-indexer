@@ -18,6 +18,7 @@ from src.exceptions.message_processing import (
 )
 from src.ai.utils import unload_model_from_memory, get_ollama_client
 from src.config.settings import settings
+from src.bot.voice_handler import get_voice_manager
 
 if TYPE_CHECKING:
     from src.bot.client import DiscordBot
@@ -93,6 +94,30 @@ class Cleanup:
 
                     except discord.HTTPException as e:
                         self.logger.warning(f"Error cleaning up guild '{guild.name}': {e}")
+
+            # Clean up voice clients (active voice connections)
+            if hasattr(self.bot, 'voice_clients') and self.bot.voice_clients:
+                self.logger.info("Disconnecting from voice channels...")
+                for voice_client in self.bot.voice_clients:
+                    try:
+                        if voice_client.is_connected():
+                            guild_name = voice_client.guild.name if voice_client.guild else "Unknown"
+                            channel_name = voice_client.channel.name if voice_client.channel else "Unknown"
+                            self.logger.info(
+                                f"Disconnecting from voice channel '{channel_name}' "
+                                f"in '{guild_name}'"
+                            )
+                            await voice_client.disconnect(force=False)
+                    except discord.HTTPException as e:
+                        self.logger.warning(f"Failed to disconnect voice client: {e}")
+
+            # Clean up voice sessions in database
+            try:
+                voice_manager = get_voice_manager(self.bot)
+                await voice_manager.cleanup_all_voice_channels()
+                self.logger.info("Voice sessions cleaned up successfully")
+            except Exception as e:
+                self.logger.warning(f"Error cleaning up voice sessions: {e}")
 
             # Close bot connection properly
             if not self.bot.is_closed():

@@ -42,19 +42,15 @@ Your generated instruction file MUST follow this exact structure:
 
 ## Specific Responsibilities
 
-### [Category from Report]
 - **Action verb** specific technical task
 - **Manage** particular component
 - **Validate** specific conditions
-- [more detailed responsibilities per category]
-[more categories total based on report]
 
 ## Coordination Boundaries
 - **Works WITH [component/agent]**: How they interact
 - **Provides TO [component]**: What this agent outputs
 - **Receives FROM [component]**: What inputs expected
 - **Does NOT**: Clear out-of-scope statement
-[more boundary definitions from report]
 
 ## Implementation Process
 1. **Analysis Phase**: Understand existing code and patterns
@@ -62,7 +58,6 @@ Your generated instruction file MUST follow this exact structure:
 3. **Implementation Phase**: Write functionality following standards
 4. **Testing Phase**: Validate changes and check for regressions
 5. **[Final Phase]**: Integration or optimization step
-[more phases aligned with workflow patterns in report]
 
 ## [Optional Domain-Specific Sections]
 [Add based on report's domain-specific considerations]
@@ -73,7 +68,7 @@ Your generated instruction file MUST follow this exact structure:
 - **Use Report Data**: All content must be derived from the creation report, not invented
 - **Match Agent Tools**: Ensure documented workflows align with available tools
 - **Follow Standards**: Adhere to project standards (no emojis, absolute imports, etc.)
-- **Be Specific**: Use concrete file paths and component names from the report
+- **Be Specific**: Use concrete file paths and component names from the report. Exclude line-numbers.
 - **Maintain Consistency**: Ensure terminology matches between definition and instructions
 
 ## Output Requirements
@@ -82,6 +77,7 @@ Your generated instruction file MUST follow this exact structure:
 2. The agent definition must be updated to reference the instruction file
 3. Both files must be syntactically valid Markdown
 4. File naming must exactly match the agent name (kebab-case)
+5. The instructions file must not be longer than 100 lines.
 
 # Final Report
 
