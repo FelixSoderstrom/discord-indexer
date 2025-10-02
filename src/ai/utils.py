@@ -244,7 +244,7 @@ def generate_image_description_sync(image_data: bytes, prompt: str, model_name: 
             images=[image_data],
             stream=False,
             options={
-                "temperature": 0.1,  # Low temperature for consistent descriptions
+                "temperature": 0.2,  # Low temperature for consistent descriptions
                 "num_predict": 350   # Reduced token limit for structured format
             }
         )

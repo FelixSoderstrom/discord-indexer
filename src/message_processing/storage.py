@@ -108,27 +108,24 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
         # Get collection with configured embedding model
         collection = get_collection(server_id, "messages")
         
-        # Prepare document content (message text + link summaries + image descriptions)
-        document_content = message_metadata.get('content', '')
-        
-        # Add link summaries if available
-        if extractions and extractions.get('link_summaries_combined'):
-            link_summaries = extractions['link_summaries_combined']
-            if document_content:
-                document_content = f"{document_content}\n\n{link_summaries}"
-            else:
-                document_content = link_summaries
-        
+        # Prepare document content with standardized format
+        message_text = message_metadata.get('content', '').strip()
+        link_summaries = extractions.get('link_summaries_combined', '').strip() if extractions else ''
+        image_descriptions = embeddings.get('image_descriptions', '').strip() if embeddings else ''
+
+        # Always start with "User said:" prefix
+        if message_text:
+            document_content = f"User said: {message_text}"
+        else:
+            document_content = "User said: [NULL]"
+
         # Add image descriptions if available
-        if embeddings and embeddings.get('image_descriptions'):
-            image_descriptions = embeddings['image_descriptions']
-            if document_content:
-                document_content = f"Discord message: {document_content}\nImage description: {image_descriptions}"
-            else:
-                document_content = f"Image description: {image_descriptions}"
-        elif document_content:
-            # Format as Discord message even without images for consistency
-            document_content = f"Discord message: {document_content}"
+        if image_descriptions:
+            document_content += f"\nAttached image contains: {image_descriptions}"
+
+        # Add link summaries if available
+        if link_summaries:
+            document_content += f"\nAttached link contains: {link_summaries}"
         
         # Skip empty messages
         if not document_content.strip():
