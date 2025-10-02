@@ -108,24 +108,35 @@ def store_complete_message(processed_data: Dict[str, Any]) -> bool:
         # Get collection with configured embedding model
         collection = get_collection(server_id, "messages")
         
-        # Prepare document content with standardized format
+        # Prepare document content with semantic connections
         message_text = message_metadata.get('content', '').strip()
         link_summaries = extractions.get('link_summaries_combined', '').strip() if extractions else ''
         image_descriptions = embeddings.get('image_descriptions', '').strip() if embeddings else ''
 
-        # Always start with "User said:" prefix
-        if message_text:
+        # Detect short image references (likely referring to image directly)
+        is_short_reference = False
+        if message_text and image_descriptions:
+            word_count = len(message_text.split())
+            has_sentence_end = any(message_text.endswith(punct) for punct in ['.', '!', '?'])
+            is_short_reference = word_count <= 5 and not has_sentence_end
+
+        # Create semantically connected document content
+        if is_short_reference:
+            # Direct merge for short references like "favourite landscape"
+            document_content = f"{message_text}: {image_descriptions}"
+        elif message_text and image_descriptions:
+            # Separate but connected for longer messages
+            document_content = f"User said: {message_text}\nImage shows: {image_descriptions}"
+        elif message_text:
             document_content = f"User said: {message_text}"
+        elif image_descriptions:
+            document_content = f"User shared image showing: {image_descriptions}"
         else:
             document_content = "User said: [NULL]"
 
-        # Add image descriptions if available
-        if image_descriptions:
-            document_content += f"\nAttached image contains: {image_descriptions}"
-
         # Add link summaries if available
         if link_summaries:
-            document_content += f"\nAttached link contains: {link_summaries}"
+            document_content += f"\nLink content: {link_summaries}"
         
         # Skip empty messages
         if not document_content.strip():

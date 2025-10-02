@@ -60,9 +60,9 @@ class LangChainDMAssistant:
         """
         self.model_name = model_name or settings.LLM_MODEL_NAME
         self.temperature = (
-            temperature 
-            if temperature is not None 
-            else float(os.getenv("LLM_TEMPERATURE", "0.7"))
+            temperature
+            if temperature is not None
+            else float(os.getenv("LLM_TEMPERATURE", "0.1"))
         )
         self.max_response_length = (
             max_response_length 

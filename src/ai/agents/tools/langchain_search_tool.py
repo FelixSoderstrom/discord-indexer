@@ -45,8 +45,8 @@ def create_server_specific_search_tool(server_id: str):
             # Create search tool for the bound server
             search_tool = create_search_tool(server_id)
             
-            # Execute search with fixed limit
-            results = search_tool.search_messages(query, 15)
+            # Execute search with fixed limit (reduced to 5 for small model optimization)
+            results = search_tool.search_messages(query, 5)
             
             # Format results
             formatted_results = search_tool.format_search_results(results)

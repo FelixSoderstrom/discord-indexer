@@ -64,21 +64,28 @@ class SearchTool:
                     results['metadatas'][0],
                     results['distances'][0]
                 )):
+                    # Calculate relevance score
+                    relevance_score = round(1.0 - distance, 3)
+
+                    # Filter out low-relevance results (< 0.1 threshold)
+                    if relevance_score < 0.1:
+                        continue
+
                     # Determine best display name to show (prioritize friendly names over technical usernames)
                     # Priority order: computed display name > global display name > server nickname > username/handle
                     author_display = (
-                        metadata.get('author_display_name') or 
-                        metadata.get('author_global_name') or 
-                        metadata.get('author_nick') or 
+                        metadata.get('author_display_name') or
+                        metadata.get('author_global_name') or
+                        metadata.get('author_nick') or
                         metadata.get('author_name', 'Unknown')
                     )
-                    
+
                     formatted_results.append({
                         'content': doc,
                         'author': author_display,
                         'channel': metadata.get('channel_name', 'Unknown'),
                         'timestamp': metadata.get('timestamp', ''),
-                        'relevance_score': round(1.0 - distance, 3)  # Convert distance to relevance
+                        'relevance_score': relevance_score
                     })
             
             logger.debug(f"Found {len(formatted_results)} results for query: {query[:50]}")
@@ -106,25 +113,29 @@ search_messages: Search Discord message history for relevant content
     
     def format_search_results(self, results: List[Dict[str, Any]]) -> str:
         """Format search results for display in conversation.
-        
+
         Args:
             results: Search results from search_messages()
-            
+
         Returns:
             Formatted string for inclusion in response
         """
         if not results:
             return "No relevant messages found in the server history."
-        
+
         formatted = "Here's what I found in the message history:\n\n"
-        
+
         for i, result in enumerate(results, 1):
             author = result['author']
             channel = result['channel']
             timestamp = result.get('timestamp', '')
-            content = result['content'][:200] + "..." if len(result['content']) > 200 else result['content']
-            
-            formatted += f"**{i}. {author}** in #{channel}"
+            relevance_score = result.get('relevance_score', 0.0)
+
+            # Increase content truncation from 200 to 800 characters
+            content = result['content'][:800] + "..." if len(result['content']) > 800 else result['content']
+
+            # Show raw relevance score (no calculation to fail)
+            formatted += f"**#{i}. {author}** in #{channel} (relevance: {relevance_score:.3f})"
             if timestamp:
                 try:
                     # Try to format timestamp nicely
@@ -132,9 +143,9 @@ search_messages: Search Discord message history for relevant content
                     formatted += f" ({dt.strftime('%Y-%m-%d %H:%M')})"
                 except:
                     pass
-            
+
             formatted += f"\n> {content}\n\n"
-        
+
         return formatted
 
 
