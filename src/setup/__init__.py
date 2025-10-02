@@ -9,7 +9,8 @@ from .server_setup import (
     is_server_configured,
     get_server_config,
     ensure_server_configured,
-    configure_all_servers
+    configure_all_servers,
+    fetch_bot_guilds
 )
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     'is_server_configured',
     'get_server_config',
     'ensure_server_configured',
-    'configure_all_servers'
+    'configure_all_servers',
+    'fetch_bot_guilds'
 ]

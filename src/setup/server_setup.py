@@ -6,6 +6,7 @@ interaction and persistent configuration storage using SQLite with in-memory cac
 
 import logging
 import sqlite3
+import aiohttp
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
@@ -16,6 +17,62 @@ logger = logging.getLogger(__name__)
 # Global cache of configured server IDs for fast lookup
 _configured_servers: List[str] = []
 
+
+async def fetch_bot_guilds(token: str) -> List[Dict[str, str]]:
+    """Fetch bot's guild list using Discord REST API.
+
+    Uses aiohttp to call Discord's REST API and retrieve the list of guilds
+    the bot is a member of. This allows pre-startup configuration without
+    blocking the async event loop.
+
+    Args:
+        token: Discord bot token for authentication
+
+    Returns:
+        List of dicts with 'id' and 'name' keys for each guild
+
+    Raises:
+        aiohttp.ClientError: If HTTP request fails
+        ValueError: If response is invalid or missing required fields
+    """
+    url = "https://discord.com/api/v10/users/@me/guilds"
+    headers = {
+        "Authorization": f"Bot {token}"
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"Discord REST API returned status {response.status}: {error_text}")
+                    raise aiohttp.ClientError(
+                        f"Discord API request failed with status {response.status}: {error_text}"
+                    )
+
+                guilds_data = await response.json()
+
+                # Validate and transform response
+                guilds = []
+                for guild in guilds_data:
+                    if 'id' not in guild or 'name' not in guild:
+                        logger.warning(f"Skipping invalid guild data: {guild}")
+                        continue
+
+                    guilds.append({
+                        'id': str(guild['id']),
+                        'name': guild['name']
+                    })
+
+                logger.info(f"Successfully fetched {len(guilds)} guilds via REST API")
+                return guilds
+
+    except aiohttp.ClientError as e:
+        logger.error(f"HTTP error fetching guilds from Discord API: {e}")
+        raise
+    except (ValueError, KeyError, TypeError) as e:
+        logger.error(f"Invalid response from Discord API: {e}")
+        raise ValueError(f"Invalid Discord API response: {e}")
 
 
 def load_configured_servers() -> List[str]:
@@ -54,32 +111,33 @@ def is_server_configured(server_id: str) -> bool:
 
 def get_server_config(server_id: str) -> Optional[Dict[str, Any]]:
     """Get configuration for a specific server.
-    
+
     Args:
         server_id: Discord server/guild ID
-        
+
     Returns:
         Dictionary of server configuration or None if not found
     """
     try:
         with get_config_db() as conn:
             cursor = conn.execute("""
-                SELECT server_id, message_processing_error_handling, embedding_model_name, created_at, updated_at
-                FROM server_configs 
+                SELECT server_id, server_name, message_processing_error_handling, embedding_model_name, created_at, updated_at
+                FROM server_configs
                 WHERE server_id = ?
             """, (server_id,))
-            
+
             row = cursor.fetchone()
             if row:
                 return {
                     'server_id': row[0],
-                    'message_processing_error_handling': row[1],
-                    'embedding_model_name': row[2],
-                    'created_at': row[3],
-                    'updated_at': row[4]
+                    'server_name': row[1],
+                    'message_processing_error_handling': row[2],
+                    'embedding_model_name': row[3],
+                    'created_at': row[4],
+                    'updated_at': row[5]
                 }
             return None
-            
+
     except sqlite3.Error as e:
         logger.error(f"Failed to get server config for {server_id}: {e}")
         return None
@@ -156,33 +214,35 @@ def run_setup_terminal_ui(server_id: str, server_name: str) -> Dict[str, str]:
     }
 
 
-def save_server_config(server_id: str, config: Dict[str, str]) -> bool:
+def save_server_config(server_id: str, server_name: str, config: Dict[str, str]) -> bool:
     """Save server configuration to database.
-    
+
     Args:
         server_id: Discord server/guild ID
+        server_name: Human-readable server name
         config: Dictionary containing configuration preferences
-        
+
     Returns:
         True if saved successfully, False otherwise
     """
     try:
         with get_config_db() as conn:
             conn.execute("""
-                INSERT OR REPLACE INTO server_configs 
-                (server_id, message_processing_error_handling, embedding_model_name, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT OR REPLACE INTO server_configs
+                (server_id, server_name, message_processing_error_handling, embedding_model_name, updated_at)
+                VALUES (?, ?, ?, ?, ?)
             """, (
-                server_id, 
+                server_id,
+                server_name,
                 config['error_handling'],
                 config.get('embedding_model'),
                 datetime.now().isoformat()
             ))
             conn.commit()
-            
-        logger.info(f"Saved configuration for server {server_id}: {config}")
+
+        logger.info(f"Saved configuration for server {server_id} ({server_name}): {config}")
         return True
-        
+
     except sqlite3.Error as e:
         logger.error(f"Failed to save server config for {server_id}: {e}")
         return False
@@ -203,20 +263,20 @@ def add_server_to_cache(server_id: str) -> None:
 
 def configure_new_server(server_id: str, server_name: str) -> bool:
     """Complete configuration process for a new server.
-    
+
     Args:
         server_id: Discord server/guild ID
         server_name: Human-readable server name
-        
+
     Returns:
         True if configuration completed successfully
     """
     try:
         # Run terminal UI
         config = run_setup_terminal_ui(server_id, server_name)
-        
+
         # Save to database
-        if save_server_config(server_id, config):
+        if save_server_config(server_id, server_name, config):
             # Update in-memory cache
             add_server_to_cache(server_id)
             print(f"✅ Server {server_name} configured successfully!")
@@ -224,13 +284,51 @@ def configure_new_server(server_id: str, server_name: str) -> bool:
         else:
             print(f"❌ Failed to save configuration for {server_name}")
             return False
-            
+
     except KeyboardInterrupt:
         print(f"\n❌ Configuration cancelled for {server_name}")
         return False
-    except Exception as e:
-        logger.error(f"Configuration failed for server {server_id}: {e}")
-        print(f"❌ Configuration failed: {e}")
+
+
+def update_server_name(server_id: str, server_name: str) -> bool:
+    """Update server name in database if it has changed.
+
+    Args:
+        server_id: Discord server/guild ID
+        server_name: Current server name from Discord API
+
+    Returns:
+        True if update successful or not needed, False on error
+    """
+    try:
+        with get_config_db() as conn:
+            # Get current stored name
+            cursor = conn.execute("""
+                SELECT server_name FROM server_configs WHERE server_id = ?
+            """, (server_id,))
+
+            row = cursor.fetchone()
+            if not row:
+                # Server not configured yet
+                return True
+
+            stored_name = row[0]
+
+            # Update if name has changed
+            if stored_name != server_name:
+                conn.execute("""
+                    UPDATE server_configs
+                    SET server_name = ?, updated_at = ?
+                    WHERE server_id = ?
+                """, (server_name, datetime.now().isoformat(), server_id))
+                conn.commit()
+
+                logger.info(f"Updated server name: {server_id} '{stored_name}' -> '{server_name}'")
+
+        return True
+
+    except sqlite3.Error as e:
+        logger.error(f"Failed to update server name for {server_id}: {e}")
         return False
 
 
@@ -264,48 +362,79 @@ def ensure_server_configured(server_id: str, server_name: str) -> bool:
         return False
 
 
-def configure_all_servers(guilds) -> bool:
+def configure_all_servers(guilds: List[Dict[str, str]]) -> bool:
     """Configure all unconfigured servers at startup.
-    
+
+    Accepts guild data from Discord REST API and configures unconfigured servers.
+    Also updates server names for already-configured servers if they have changed.
+
     Args:
-        guilds: List of Discord guild objects from bot.guilds
-        
+        guilds: List of dicts with 'id' and 'name' keys from REST API
+
     Returns:
         True if all servers configured successfully, False if any failed
     """
     unconfigured_servers = []
-    
-    # Find servers that need configuration
+    configured_servers = []
+
+    # Separate configured and unconfigured servers
     for guild in guilds:
-        server_id = str(guild.id)
-        if not is_server_configured(server_id):
-            unconfigured_servers.append((server_id, guild.name))
-    
+        server_id = guild['id']
+        server_name = guild['name']
+
+        if is_server_configured(server_id):
+            configured_servers.append((server_id, server_name))
+        else:
+            unconfigured_servers.append((server_id, server_name))
+
+    # Update names for already-configured servers
+    if configured_servers:
+        logger.info(f"Updating names for {len(configured_servers)} configured server(s)...")
+        for server_id, server_name in configured_servers:
+            update_server_name(server_id, server_name)
+
+    # Check if all servers already configured
     if not unconfigured_servers:
         logger.info("All servers are already configured")
         return True
-    
+
+    # Configure unconfigured servers
     print(f"\n" + "=" * 80)
-    print(f"🚀 DISCORD BOT SETUP")
+    print(f"DISCORD BOT SETUP")
     print(f"   Found {len(unconfigured_servers)} server(s) that need configuration")
     print("=" * 80)
-    
+
     success_count = 0
-    
+    completed_servers = []
+
     for i, (server_id, server_name) in enumerate(unconfigured_servers, 1):
-        print(f"\n📋 Configuring server {i}/{len(unconfigured_servers)}")
-        
-        success = configure_new_server(server_id, server_name)
-        if success:
-            success_count += 1
-        else:
-            logger.error(f"Failed to configure server {server_name}")
-    
+        print(f"\nConfiguring server {i}/{len(unconfigured_servers)}")
+
+        try:
+            success = configure_new_server(server_id, server_name)
+            if success:
+                success_count += 1
+                completed_servers.append((server_id, server_name))
+            else:
+                logger.error(f"Failed to configure server {server_name}")
+
+        except KeyboardInterrupt:
+            print(f"\n\nConfiguration interrupted by user (Ctrl+C)")
+            print(f"Completed servers ({len(completed_servers)}):")
+            for sid, sname in completed_servers:
+                print(f"  - {sname} ({sid})")
+
+            logger.warning(
+                f"Configuration interrupted - {len(completed_servers)}/{len(unconfigured_servers)} "
+                f"servers configured successfully"
+            )
+            return False
+
     print(f"\n" + "=" * 80)
-    print(f"🎉 SETUP COMPLETE!")
+    print(f"SETUP COMPLETE!")
     print(f"   Configured: {success_count}/{len(unconfigured_servers)} servers")
     print("=" * 80)
-    
+
     if success_count == len(unconfigured_servers):
         logger.info("All servers configured successfully")
         return True

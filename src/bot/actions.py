@@ -10,7 +10,7 @@ from typing import List, Optional
 from datetime import datetime
 from dataclasses import dataclass
 from src.message_processing import MessagePipeline
-from src.setup import configure_all_servers, is_server_configured
+from src.setup import is_server_configured
 from src.ai.agents.langchain_dm_assistant import LangChainDMAssistant
 from src.ai.agents.queue_worker import initialize_queue_worker
 from src.db.setup_db import get_db
@@ -54,18 +54,7 @@ async def on_ready_handler(bot: "DiscordBot") -> None:
         logger.debug(f"  - Text channels: {len(guild.text_channels)}")
         logger.debug(f"  - Total channels: {len(guild.channels)}")
 
-    logger.info("=== Bot is ready! Starting server configuration... ===")
-    
-    # Configure all servers before starting message processing
-    logger.info("⚙️ Configuring servers...")
-    setup_success = configure_all_servers(bot.guilds)
-    
-    if not setup_success:
-        logger.error("❌ Server configuration failed - some servers may not be processed")
-        print("\n⚠️ Some servers failed configuration. Check logs for details.")
-        print("The bot will continue but may skip unconfigured servers.")
-    
-    logger.info("=== Starting message processing systems... ===")
+    logger.info("=== Bot is ready! Starting message processing systems... ===")
 
     # Initialize message pipeline with coordination event
     logger.info("🔧 Initializing message processing pipeline...")

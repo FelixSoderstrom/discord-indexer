@@ -35,7 +35,7 @@ If there are multiple sessions of this command running concurrently, **Think har
 - What effects does deploying these agents in paralell have?
 - Should I deploy some of the agents sequentially? 
 
-Onceyou have determined how to instruct and how to deploy the subagents you may deploy them.
+Once you have determined how to instruct and how to deploy the subagents you may deploy them.
 Subagent should give you structured responses when it's done.
 
 

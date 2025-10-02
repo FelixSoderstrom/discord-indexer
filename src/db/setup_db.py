@@ -113,33 +113,45 @@ def get_db(server_id: int, embedding_model: Optional[str] = None) -> Client:
 def _initialize_config_db() -> None:
     """Initialize the SQLite database for server configurations."""
     config_db_path = Path(__file__).parent / "databases" / "server_configs.db"
-    
+
     try:
         # Create database file and tables
         with sqlite3.connect(config_db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS server_configs (
                     server_id TEXT PRIMARY KEY,
+                    server_name TEXT DEFAULT NULL,
                     message_processing_error_handling TEXT DEFAULT 'skip',
                     embedding_model_name TEXT DEFAULT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+
             # Add embedding_model_name column if it doesn't exist (for existing databases)
             try:
                 conn.execute("""
-                    ALTER TABLE server_configs 
+                    ALTER TABLE server_configs
                     ADD COLUMN embedding_model_name TEXT DEFAULT NULL
                 """)
             except sqlite3.OperationalError:
                 # Column already exists
                 pass
+
+            # Add server_name column if it doesn't exist (for existing databases)
+            try:
+                conn.execute("""
+                    ALTER TABLE server_configs
+                    ADD COLUMN server_name TEXT DEFAULT NULL
+                """)
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
+
             conn.commit()
-            
+
         logger.info(f"Server configuration database ready: {config_db_path}")
-        
+
     except sqlite3.Error as e:
         logger.error(f"Failed to initialize server configuration database: {e}")
         raise

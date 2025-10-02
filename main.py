@@ -15,10 +15,11 @@ from src.config.settings import settings
 from src.bot.client import DiscordBot
 from src.bot.actions import setup_bot_actions
 from src.db import initialize_db
-from src.setup import load_configured_servers
+from src.setup import load_configured_servers, fetch_bot_guilds, configure_all_servers
 from src.cleanup import Cleanup
 from src.ai.model_manager import ModelManager
 from chromadb.errors import ChromaError
+import aiohttp
 
 
 async def main() -> None:
@@ -62,13 +63,28 @@ async def main() -> None:
         # Load configured servers into memory cache
         logger.info("📋 Loading server configurations...")
         configured_servers = load_configured_servers()
-        
-        if len(configured_servers) == 0:
-            logger.info("⚠️ No servers configured yet - will configure as messages arrive")
-            print("\n⚠️ No Discord servers are pre-configured.")
-            print("The bot will automatically prompt for configuration when messages arrive from new servers.")
-        else:
-            logger.info(f"✅ {len(configured_servers)} server(s) already configured and ready")
+        logger.info(f"Loaded {len(configured_servers)} configured server(s) from cache")
+
+        # Fetch guild list via REST API for pre-startup configuration
+        logger.info("🔍 Fetching guild list from Discord REST API...")
+        try:
+            guilds = await fetch_bot_guilds(settings.DISCORD_TOKEN)
+            logger.info(f"Successfully fetched {len(guilds)} guild(s) from Discord API")
+        except (aiohttp.ClientError, ValueError) as e:
+            logger.error(f"Failed to fetch guilds from Discord REST API: {e}")
+            logger.error("Cannot proceed without guild information - exiting")
+            sys.exit(1)
+
+        # Configure all servers before connecting to Discord
+        logger.info("⚙️ Running pre-startup server configuration...")
+        config_success = configure_all_servers(guilds)
+
+        if not config_success:
+            logger.error("Server configuration failed - cannot start bot")
+            print("\n❌ Server configuration failed. Please check the logs and try again.")
+            sys.exit(1)
+
+        logger.info("✅ All servers configured successfully - ready to start bot")
 
         # Preload embedding models to prevent runtime blocking
         logger.info("🔤 Preloading embedding models...")
